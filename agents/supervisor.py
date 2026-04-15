@@ -8,41 +8,40 @@ load_dotenv()
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
 def supervisor_node(state: AgentState) -> AgentState:
-    """
-    Decides which agent to call next based on current state.
-    """
-    system_prompt = """You are a supervisor orchestrating a research pipeline.
-    
-Given the current state of the task, decide which agent should act next.
-Your options are: 'search_agent', 'analysis_agent', 'writer_agent', 'critic_agent', 'END'
+    revision_count = state.get('revision_count', 0)
 
-Rules:
-- If no search has been done yet → 'search_agent'
-- If search is done but no analysis → 'analysis_agent'  
-- If analysis is done but no report → 'writer_agent'
-- If report exists but not approved → 'critic_agent'
-- If approved OR revision_count >= 2 → 'END'
+    if revision_count >= 2:
+        print('Supervisor -> routing to: END (revision limit reached)')
+        return {**state, 'next_agent': 'END'}
 
-Respond with ONLY the agent name, nothing else."""
+    system_prompt = (
+        'You are a supervisor orchestrating a research pipeline.\n\n'
+        'Decide which agent should act next. Options: search_agent, analysis_agent, writer_agent, critic_agent, END\n\n'
+        'Rules:\n'
+        '- No search done yet -> search_agent\n'
+        '- Search done, no analysis -> analysis_agent\n'
+        '- Analysis done, no report -> writer_agent\n'
+        '- Report exists, not approved, critique exists -> writer_agent\n'
+        '- Report revised, not approved -> critic_agent\n'
+        '- Approved -> END\n\n'
+        'Respond with ONLY the agent name.'
+    )
 
-    user_message = f"""
-Query: {state['query']}
-Search done: {bool(state.get('search_results'))}
-Analysis done: {bool(state.get('analysis'))}
-Report done: {bool(state.get('report'))}
-Approved: {state.get('is_approved', False)}
-Revision count: {state.get('revision_count', 0)}
-"""
+    user_message = (
+        f"Query: {state['query']}\n"
+        f"Search done: {bool(state.get('search_results'))}\n"
+        f"Analysis done: {bool(state.get('analysis'))}\n"
+        f"Report done: {bool(state.get('report'))}\n"
+        f"Critique exists: {bool(state.get('critique'))}\n"
+        f"Approved: {state.get('is_approved', False)}\n"
+        f"Revision count: {revision_count}\n"
+    )
 
     response = llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_message)
     ])
 
-    valid_agents = {"search_agent", "analysis_agent", "writer_agent", "critic_agent", "END"}
-    next_agent = response.content.strip().split()[0].strip("`'\".,:;")
-    if next_agent not in valid_agents:
-        next_agent = "END"
-    print(f"🎯 Supervisor → routing to: {next_agent}")
-
-    return {**state, "next_agent": next_agent}
+    next_agent = response.content.strip()
+    print(f'Supervisor -> routing to: {next_agent}')
+    return {**state, 'next_agent': next_agent}

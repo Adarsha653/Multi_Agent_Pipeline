@@ -15,7 +15,7 @@ def analysis_agent_node(state: AgentState) -> AgentState:
         search_context += f"Source {i+1}: {r['title']}\n{r['content']}\nURL: {r['url']}\n\n"
 
     response = llm.invoke([
-        SystemMessage(content="You are an expert research analyst. Given search results, synthesize the most important insights. Include: 1) Key findings 2) Common themes 3) Notable details 4) Conflicting information. Cite source numbers."),
+        SystemMessage(content="You are an expert research analyst. Given search results, synthesize the most important insights. Include: 1) Key findings 2) Common themes 3) Notable details 4) Conflicting information. Cite source numbers. Respond in English only, even if some sources are not in English."),
         HumanMessage(content=f"Query: {state['query']}\n\nSearch Results:\n{search_context}\n\nProvide structured analysis.")
     ])
 
