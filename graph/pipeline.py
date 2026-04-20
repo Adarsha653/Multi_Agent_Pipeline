@@ -1,3 +1,5 @@
+import os
+os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 from langgraph.graph import StateGraph, END
 from graph.state import AgentState
 from agents.supervisor import supervisor_node
