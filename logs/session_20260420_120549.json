@@ -1,0 +1,21 @@
+{
+  "session_id": "20260420_120549",
+  "query": "Why is the rum gone?",
+  "events": [
+    {
+      "timestamp": "2026-04-20T12:05:49.685639",
+      "event_type": "agent_start",
+      "agent": "full_pipeline",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-04-20T12:06:01.612779",
+      "event_type": "agent_end",
+      "agent": "full_pipeline",
+      "details": {
+        "total_seconds": 11.93,
+        "duration_seconds": 11.93
+      }
+    }
+  ]
+}

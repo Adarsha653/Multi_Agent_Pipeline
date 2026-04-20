@@ -1,0 +1,21 @@
+{
+  "session_id": "20260420_120113",
+  "query": "I want to know the current state of US-Iran war",
+  "events": [
+    {
+      "timestamp": "2026-04-20T12:01:13.137664",
+      "event_type": "agent_start",
+      "agent": "full_pipeline",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-04-20T12:01:29.376825",
+      "event_type": "agent_end",
+      "agent": "full_pipeline",
+      "details": {
+        "total_seconds": 16.25,
+        "duration_seconds": 16.24
+      }
+    }
+  ]
+}
