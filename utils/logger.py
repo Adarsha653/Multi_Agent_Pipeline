@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 
-os.makedirs('logs', exist_ok=True)
+os.makedirs('/tmp/logs', exist_ok=True)
 
 class PipelineLogger:
     def __init__(self, query: str):
@@ -11,7 +11,7 @@ class PipelineLogger:
         self.session_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.events = []
         self.timers = {}
-        self.log_file = f'logs/session_{self.session_id}.json'
+        self.log_file = f'/tmp/logs/session_{self.session_id}.json'
         print(f'Logger initialized — session: {self.session_id}')
 
     def start_agent(self, agent_name: str):

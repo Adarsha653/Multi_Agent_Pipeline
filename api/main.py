@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+import os as _os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -26,7 +28,7 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-os.makedirs('reports', exist_ok=True)
+os.makedirs('/tmp/reports', exist_ok=True)
 
 llm = ChatGroq(model='llama-3.3-70b-versatile', temperature=0)
 
@@ -56,9 +58,11 @@ class ReportResponse(BaseModel):
     report_file: str
     filename: str
 
-@app.get('/')
+@app.get('/', response_class=HTMLResponse)
 def root():
-    return {'status': 'running', 'message': 'Multi-Agent Research Pipeline API'}
+    ui_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'ui.html')
+    with open(ui_path, 'r') as f:
+        return f.read()
 
 @app.post('/research', response_model=ReportResponse)
 def run_research(request: QueryRequest):
@@ -70,11 +74,11 @@ def run_research(request: QueryRequest):
         duration = round(time.time() - start, 2)
         base_name = generate_filename(request.query)
         filename = f'{base_name}.md'
-        filepath = f'reports/{filename}'
+        filepath = f'/tmp/reports/{filename}'
         counter = 1
         while os.path.exists(filepath):
             filename = f'{base_name}-{counter}.md'
-            filepath = f'reports/{filename}'
+            filepath = f'/tmp/reports/{filename}'
             counter += 1
         with open(filepath, 'w') as f:
             f.write(f'# Query\n{request.query}\n\n')
@@ -98,13 +102,13 @@ def run_research(request: QueryRequest):
 
 @app.get('/reports')
 def list_reports():
-    files = os.listdir('reports')
+    files = os.listdir('/tmp/reports')
     reports = [f for f in files if f.endswith('.md')]
     return {'reports': sorted(reports, reverse=True)}
 
 @app.get('/reports/{filename}')
 def get_report(filename: str):
-    path = f'reports/{filename}'
+    path = f'/tmp/reports/{filename}'
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail='Report not found')
     with open(path, 'r') as f:
@@ -113,7 +117,7 @@ def get_report(filename: str):
 
 @app.get('/reports/{filename}/download')
 def download_report(filename: str):
-    path = f'reports/{filename}'
+    path = f'/tmp/reports/{filename}'
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail='Report not found')
     return FileResponse(path, media_type='text/markdown', filename=filename)
