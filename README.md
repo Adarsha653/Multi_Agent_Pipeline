@@ -13,7 +13,7 @@ An autonomous multi-agent system that researches any topic end-to-end — search
 
 ## Live Demo
 
-Hugging Face Space: https://huggingface.co/spaces/Terrorblade653/multi-agent-pipeline
+Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pipeline
 
 ---
 
