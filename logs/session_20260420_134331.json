@@ -1,0 +1,21 @@
+{
+  "session_id": "20260420_134331",
+  "query": "Why is carrot bitter?",
+  "events": [
+    {
+      "timestamp": "2026-04-20T13:43:31.514242",
+      "event_type": "agent_start",
+      "agent": "full_pipeline",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-04-20T13:43:42.571955",
+      "event_type": "agent_end",
+      "agent": "full_pipeline",
+      "details": {
+        "total_seconds": 11.07,
+        "duration_seconds": 11.06
+      }
+    }
+  ]
+}
