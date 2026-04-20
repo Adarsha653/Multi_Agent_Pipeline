@@ -1,0 +1,21 @@
+{
+  "session_id": "20260420_143538",
+  "query": "Latest developments in renewable energy 2025",
+  "events": [
+    {
+      "timestamp": "2026-04-20T14:35:38.645327",
+      "event_type": "agent_start",
+      "agent": "full_pipeline",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-04-20T14:35:53.235419",
+      "event_type": "agent_end",
+      "agent": "full_pipeline",
+      "details": {
+        "total_seconds": 14.6,
+        "duration_seconds": 14.59
+      }
+    }
+  ]
+}

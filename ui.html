@@ -1,116 +1,235 @@
 <!DOCTYPE html>
-<html lang='en'>
+<html lang="en">
 <head>
-  <meta charset='UTF-8'>
-  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multi-Agent Research Pipeline</title>
-  <script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    .chip { padding: 6px 13px; border-radius: 20px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #888; font-size: 0.78rem; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+    .chip:hover { border-color: #6366f1; color: #6366f1; background: #6366f110; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
     .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
-    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; background: linear-gradient(90deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .subtitle { color: #666; margin-bottom: 40px; font-size: 0.95rem; }
-    .search-box { display: flex; gap: 12px; margin-bottom: 32px; }
-    input { flex: 1; padding: 14px 18px; border-radius: 10px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e0e0e0; font-size: 1rem; outline: none; transition: border 0.2s; }
-    input:focus { border-color: #6366f1; }
-    button { padding: 14px 28px; border-radius: 10px; border: none; background: linear-gradient(90deg, #6366f1, #8b5cf6); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
-    button:hover { opacity: 0.9; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .status { padding: 16px 20px; border-radius: 10px; background: #1a1a1a; border: 1px solid #2a2a2a; margin-bottom: 24px; display: none; }
-    .status.running { border-color: #6366f1; }
-    .status.done { border-color: #22c55e; }
-    .status.error { border-color: #ef4444; }
-    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #6366f1; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .score-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; text-align: center; }
-    .score-card .value { font-size: 2rem; font-weight: 700; color: #6366f1; }
-    .score-card .label { font-size: 0.75rem; color: #666; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-    .meta-item { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 8px 14px; font-size: 0.85rem; color: #888; }
-    .meta-item span { color: #e0e0e0; font-weight: 600; }
-    .report { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 32px; line-height: 1.7; display: none; }
-    .report h1 { font-size: 1.6rem; margin-bottom: 16px; background: none; -webkit-text-fill-color: #e0e0e0; }
-    .report h2 { font-size: 1.2rem; color: #6366f1; margin: 24px 0 12px; }
-    .report p { color: #bbb; margin-bottom: 12px; }
-    .report ul, .report ol { color: #bbb; padding-left: 24px; margin-bottom: 12px; }
-    .report li { margin-bottom: 6px; }
-    .feedback { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px; display: none; }
-    .feedback .label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-    .feedback p { color: #bbb; font-size: 0.9rem; }
+    h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 6px; background: linear-gradient(90deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .subtitle { color: #555; margin-bottom: 36px; font-size: 0.9rem; }
+    .search-box { display: flex; gap: 10px; margin-bottom: 28px; }
+    input[type=text] { flex: 1; padding: 13px 16px; border-radius: 8px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e0e0e0; font-size: 0.95rem; outline: none; transition: border 0.2s; }
+    input[type=text]:focus { border-color: #6366f1; }
+    .btn-primary { padding: 13px 26px; border-radius: 8px; border: none; background: linear-gradient(90deg, #6366f1, #8b5cf6); color: white; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
+    .btn-primary:hover { opacity: 0.88; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary { padding: 7px 14px; border-radius: 6px; border: 1px solid #2a2a2a; background: transparent; color: #aaa; font-size: 0.8rem; cursor: pointer; transition: background 0.15s, color 0.15s; }
+    .btn-secondary:hover { background: #2a2a2a; color: #e0e0e0; }
+    .btn-download { padding: 7px 14px; border-radius: 6px; border: none; background: #6366f1; color: white; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    .btn-download:hover { opacity: 0.85; }
+    .status { padding: 13px 18px; border-radius: 8px; background: #1a1a1a; border: 1px solid #2a2a2a; margin-bottom: 22px; display: none; align-items: center; gap: 10px; font-size: 0.88rem; }
+    .status.running { display: flex; border-color: #6366f1; color: #aaa; }
+    .status.done { display: flex; border-color: #22c55e; color: #aaa; }
+    .status.error { display: flex; border-color: #ef4444; color: #f87171; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green { background: #22c55e; }
+    .dot.purple { background: #6366f1; animation: pulse 1.2s infinite; }
+    .dot.red { background: #ef4444; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    .scores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+    .score-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px; text-align: center; }
+    .score-card.overall { border-color: #6366f133; }
+    .score-card .value { font-size: 1.6rem; font-weight: 600; color: #6366f1; }
+    .score-card .label { font-size: 0.7rem; color: #555; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .meta-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .meta-item { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 7px 13px; font-size: 0.82rem; color: #666; }
+    .meta-item span { color: #e0e0e0; font-weight: 500; }
+    .meta-item span.green { color: #22c55e; }
+    .meta-actions { margin-left: auto; display: flex; gap: 8px; }
+    .feedback { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; display: none; }
+    .feedback .label { font-size: 0.7rem; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+    .feedback p { color: #888; font-size: 0.85rem; line-height: 1.6; }
+    .report-box { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 28px; display: none; margin-bottom: 28px; }
+    .report-box h1 { font-size: 1.4rem; margin-bottom: 14px; background: none; -webkit-text-fill-color: #e0e0e0; }
+    .report-box h2 { font-size: 1.05rem; color: #6366f1; margin: 22px 0 10px; }
+    .report-box p { color: #bbb; font-size: 0.9rem; line-height: 1.75; margin-bottom: 12px; }
+    .report-box ul, .report-box ol { color: #bbb; font-size: 0.9rem; padding-left: 22px; margin-bottom: 12px; }
+    .report-box li { margin-bottom: 5px; line-height: 1.65; }
+    .prev-section { display: none; border-top: 1px solid #1e1e1e; padding-top: 22px; margin-top: 8px; }
+    .prev-label { font-size: 0.72rem; color: #444; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+    .prev-list { display: flex; flex-direction: column; gap: 8px; }
+    .prev-item { display: flex; align-items: center; justify-content: space-between; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px 14px; }
+    .prev-item span { font-size: 0.85rem; color: #888; }
+    .copy-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1a1a; border: 1px solid #2a2a2a; color: #aaa; font-size: 0.82rem; padding: 10px 20px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .copy-toast.show { opacity: 1; }
   </style>
 </head>
 <body>
-  <div class='container'>
-    <h1>Multi-Agent Research Pipeline</h1>
-    <p class='subtitle'>Powered by LangGraph + Groq + DuckDuckGo — fully autonomous research</p>
-    <div class='search-box'>
-      <input type='text' id='query' placeholder='Ask anything... e.g. What are the latest AI breakthroughs in 2025?' />
-      <button id='btn' onclick='runResearch()'>Research</button>
-    </div>
-    <div class='status' id='status'></div>
-    <div class='scores' id='scores'></div>
-    <div class='meta' id='meta'></div>
-    <div class='feedback' id='feedback'></div>
-    <div class='report' id='report'></div>
+<div class="container">
+  <h1>Multi-Agent Research Pipeline</h1>
+  <p class="subtitle">Type any research question below and the pipeline will search the web, analyse findings, write a structured report, and score it — automatically.</p>
+
+  <div class="search-box">
+    <input type="text" id="query" placeholder="Ask anything... e.g. What are the latest AI breakthroughs in 2025?" />
+    <button class="btn-primary" id="btn" onclick="runResearch()">Research</button>
   </div>
-  <script>
-    const input = document.getElementById('query');
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') runResearch(); });
 
-    function setStatus(msg, type) {
-      const el = document.getElementById('status');
-      el.style.display = 'block';
-      el.className = 'status ' + type;
-      el.innerHTML = type === 'running' ? `<span class='spinner'></span>${msg}` : msg;
+  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px;" id="chips">
+    <span style="font-size:0.75rem; color:#444; align-self:center; margin-right:2px;">Try:</span>
+    <button class="chip" onclick="fillQuery('What are the latest AI breakthroughs in 2025?')">AI breakthroughs 2025</button>
+    <button class="chip" onclick="fillQuery('How does quantum computing work?')">How quantum computing works</button>
+    <button class="chip" onclick="fillQuery('Latest developments in renewable energy 2025')">Renewable energy trends</button>
+    <button class="chip" onclick="fillQuery('What is the future of electric vehicles?')">Future of electric vehicles</button>
+    <button class="chip" onclick="fillQuery('How does the human immune system work?')">Human immune system</button>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="scores" id="scores" style="display:none;"></div>
+  <div class="meta-row" id="meta" style="display:none;"></div>
+  <div class="feedback" id="feedback"></div>
+  <div class="report-box" id="report"></div>
+
+  <div class="prev-section" id="prevSection">
+    <div class="prev-label">Previous reports</div>
+    <div class="prev-list" id="prevList"></div>
+  </div>
+</div>
+
+<div class="copy-toast" id="toast">Copied to clipboard</div>
+
+<script>
+  const API = 'http://localhost:8000';
+  let currentFilename = '';
+  let currentReport = '';
+
+  document.getElementById('query').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runResearch();
+  });
+
+  function setStatus(msg, type) {
+    const el = document.getElementById('status');
+    const dots = { running: 'purple', done: 'green', error: 'red' };
+    el.className = 'status ' + type;
+    el.innerHTML = '<div class="dot ' + dots[type] + '"></div>' + msg;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  function downloadReport(filename, content) {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function loadPreviousReports() {
+    try {
+      const res = await fetch(API + '/reports');
+      const data = await res.json();
+      const reports = data.reports || [];
+      if (!reports.length) return;
+      const section = document.getElementById('prevSection');
+      const list = document.getElementById('prevList');
+      section.style.display = 'block';
+      list.innerHTML = reports.slice(0, 8).map(f =>
+        '<div class="prev-item">' +
+          '<span>' + f.replace('.md','') + '</span>' +
+          '<button class="btn-secondary" onclick="fetchAndDownload(\'' + f + '\')">Download</button>' +
+        '</div>'
+      ).join('');
+    } catch(e) {}
+  }
+
+  async function fetchAndDownload(filename) {
+    try {
+      const res = await fetch(API + '/reports/' + filename);
+      const data = await res.json();
+      downloadReport(filename, data.content);
+    } catch(e) {
+      showToast('Download failed');
     }
+  }
 
-    async function runResearch() {
-      const query = document.getElementById('query').value.trim();
-      if (!query) return;
-      const btn = document.getElementById('btn');
-      btn.disabled = true;
-      btn.textContent = 'Researching...';
-      document.getElementById('scores').innerHTML = '';
-      document.getElementById('meta').innerHTML = '';
-      document.getElementById('report').style.display = 'none';
-      document.getElementById('feedback').style.display = 'none';
-      setStatus('Pipeline running — searching, analyzing, writing, reviewing...', 'running');
-      try {
-        const res = await fetch('http://localhost:8000/research', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query })
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        setStatus('Report generated and approved!', 'done');
-        const scoreKeys = ['relevance', 'completeness', 'clarity', 'structure', 'overall'];
-        document.getElementById('scores').innerHTML = scoreKeys.map(k =>
-          `<div class='score-card'><div class='value'>${data.scores[k] ?? '?'}</div><div class='label'>${k}</div></div>`
-        ).join('');
-        document.getElementById('meta').innerHTML = [
-          `<div class='meta-item'>Duration: <span>${data.duration_seconds}s</span></div>`,
-          `<div class='meta-item'>Revisions: <span>${data.revisions}</span></div>`,
-          `<div class='meta-item'>Approved: <span>${data.approved ? 'Yes' : 'No'}</span></div>`,
-          `<div class='meta-item'>Saved: <span>${data.report_file}</span></div>`
-        ].join('');
-        if (data.scores.feedback) {
-          const fb = document.getElementById('feedback');
-          fb.style.display = 'block';
-          fb.innerHTML = `<div class='label'>Evaluator Feedback</div><p>${data.scores.feedback}</p>`;
-        }
-        const reportEl = document.getElementById('report');
-        reportEl.style.display = 'block';
-        reportEl.innerHTML = marked.parse(data.report);
-      } catch (err) {
-        setStatus('Error: ' + err.message, 'error');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Research';
+  async function runResearch() {
+    const query = document.getElementById('query').value.trim();
+    if (!query) return;
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    btn.textContent = 'Researching...';
+    document.getElementById('scores').style.display = 'none';
+    document.getElementById('meta').style.display = 'none';
+    document.getElementById('report').style.display = 'none';
+    document.getElementById('feedback').style.display = 'none';
+    setStatus('Pipeline running — searching, analysing, writing, reviewing...', 'running');
+
+    try {
+      const res = await fetch(API + '/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+
+      currentFilename = data.filename;
+      currentReport = data.report;
+
+      setStatus('Report generated and approved!', 'done');
+
+      const scoreKeys = ['relevance','completeness','clarity','structure','overall'];
+      const scoresEl = document.getElementById('scores');
+      scoresEl.style.display = 'grid';
+      scoresEl.innerHTML = scoreKeys.map(k =>
+        '<div class="score-card' + (k==='overall'?' overall':'') + '">' +
+          '<div class="value">' + (data.scores[k] ?? '?') + '</div>' +
+          '<div class="label">' + k + '</div>' +
+        '</div>'
+      ).join('');
+
+      const metaEl = document.getElementById('meta');
+      metaEl.style.display = 'flex';
+      metaEl.innerHTML =
+        '<div class="meta-item">Duration: <span>' + data.duration_seconds + 's</span></div>' +
+        '<div class="meta-item">Revisions: <span>' + data.revisions + '</span></div>' +
+        '<div class="meta-item">Approved: <span class="green">' + (data.approved ? 'Yes' : 'No') + '</span></div>' +
+        '<div class="meta-actions">' +
+          '<button class="btn-secondary" onclick="copyReport()">Copy</button>' +
+          '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>' +
+        '</div>';
+
+      if (data.scores.feedback) {
+        const fb = document.getElementById('feedback');
+        fb.style.display = 'block';
+        fb.innerHTML = '<div class="label">Evaluator feedback</div><p>' + data.scores.feedback + '</p>';
       }
+
+      const reportEl = document.getElementById('report');
+      reportEl.style.display = 'block';
+      reportEl.innerHTML = marked.parse(data.report);
+
+      loadPreviousReports();
+
+    } catch(err) {
+      setStatus('Error: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Research';
     }
-  </script>
+  }
+
+  function fillQuery(text) {
+    document.getElementById('query').value = text;
+    document.getElementById('query').focus();
+  }
+
+  function copyReport() {
+    navigator.clipboard.writeText(currentReport).then(() => showToast('Copied to clipboard'));
+  }
+
+  loadPreviousReports();
+</script>
 </body>
 </html>

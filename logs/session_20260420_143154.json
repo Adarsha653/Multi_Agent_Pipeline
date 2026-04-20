@@ -1,0 +1,21 @@
+{
+  "session_id": "20260420_143154",
+  "query": "Election in Nepal 2026",
+  "events": [
+    {
+      "timestamp": "2026-04-20T14:31:54.425982",
+      "event_type": "agent_start",
+      "agent": "full_pipeline",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-04-20T14:32:03.796450",
+      "event_type": "agent_end",
+      "agent": "full_pipeline",
+      "details": {
+        "total_seconds": 9.38,
+        "duration_seconds": 9.37
+      }
+    }
+  ]
+}
