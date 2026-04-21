@@ -1,4 +1,6 @@
 import os
+from typing import Any, Iterator
+
 os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 from langgraph.graph import StateGraph, END
 from graph.state import AgentState
@@ -10,6 +12,14 @@ from agents.critic_agent import critic_agent_node
 from utils.logger import PipelineLogger
 from eval.evaluator import evaluate_report
 import time
+
+# User-facing SSE labels when supervisor routes to each worker (stream_mode="values" on next_agent change).
+_STEP_LABELS: dict[str, str] = {
+    'search_agent': 'Searching the web…',
+    'analysis_agent': 'Analysing findings…',
+    'writer_agent': 'Writing report…',
+    'critic_agent': 'Reviewing report…',
+}
 
 def route(state: AgentState) -> str:
     return state.get('next_agent', 'END')
@@ -72,6 +82,64 @@ def run_pipeline(query: str):
     logger.summary()
 
     return result, scores
+
+
+def iter_research_events(query: str) -> Iterator[dict[str, Any]]:
+    """
+    Run the graph once while yielding progress dicts for SSE.
+    Yields: {"type": "step", "step": str, "message": str}, then {"type": "complete", ...}.
+    """
+    logger = PipelineLogger(query)
+    start_time = time.time()
+    initial_state: AgentState = {
+        'query': query,
+        'messages': [],
+        'search_results': [],
+        'analysis': '',
+        'report': '',
+        'critique': '',
+        'is_approved': False,
+        'next_agent': '',
+        'revision_count': 0,
+    }
+    pipeline = build_graph()
+    print(f'\nRunning pipeline for: {query}\n')
+    logger.start_agent('full_pipeline')
+
+    prev_next = None
+    final_state: dict[str, Any] = dict(initial_state)
+
+    for state in pipeline.stream(initial_state, stream_mode='values'):
+        final_state = state
+        na = (state.get('next_agent') or '').strip()
+        if na != prev_next and na in _STEP_LABELS:
+            yield {'type': 'step', 'step': na, 'message': _STEP_LABELS[na]}
+            prev_next = na
+        elif na != prev_next:
+            prev_next = na
+
+    total_time = round(time.time() - start_time, 2)
+    logger.end_agent('full_pipeline', {'total_seconds': total_time})
+
+    yield {'type': 'step', 'step': 'evaluator', 'message': 'Scoring report…'}
+    scores = evaluate_report(query, final_state.get('report', ''), final_state.get('search_results') or [])
+
+    print(f'\nTotal pipeline time: {total_time}s')
+    print(f'Revisions made: {final_state.get("revision_count", 0)}')
+    print(f'Approved: {final_state.get("is_approved", False)}')
+    logger.summary()
+
+    yield {
+        'type': 'complete',
+        'duration_seconds': total_time,
+        'scores': scores,
+        'result': {
+            'report': final_state.get('report', ''),
+            'is_approved': final_state.get('is_approved', False),
+            'revision_count': final_state.get('revision_count', 0),
+        },
+    }
+
 
 if __name__ == '__main__':
     run_pipeline('What are the latest AI breakthroughs in 2025?')

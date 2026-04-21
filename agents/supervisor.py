@@ -1,23 +1,18 @@
-from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
 from graph.state import AgentState
-from dotenv import load_dotenv
-
-load_dotenv()
-
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
 def supervisor_node(state: AgentState) -> AgentState:
     revision_count = state.get('revision_count', 0)
     search_done = bool(state.get('search_results'))
     analysis_done = bool(state.get('analysis'))
     report_done = bool(state.get('report'))
+    # Writer clears critique after each successful draft so this becomes False again → critic_agent.
     critique_done = bool(state.get('critique'))
     is_approved = state.get('is_approved', False)
 
     # Hard rules — no LLM needed, pure logic
     if is_approved:
         next_agent = 'END'
+    # revision_count increments once per critic visit; >= 2 means at most two critic reviews, then stop.
     elif revision_count >= 2:
         next_agent = 'END'
     elif not search_done:

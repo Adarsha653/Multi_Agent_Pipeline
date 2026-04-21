@@ -14,8 +14,8 @@
     h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 6px; background: linear-gradient(90deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .subtitle { color: #555; margin-bottom: 36px; font-size: 0.9rem; }
     .search-box { display: flex; gap: 10px; margin-bottom: 28px; }
-    input[type=text] { flex: 1; padding: 13px 16px; border-radius: 8px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e0e0e0; font-size: 0.95rem; outline: none; transition: border 0.2s; }
-    input[type=text]:focus { border-color: #6366f1; }
+    .search-box input[type=text] { flex: 1; padding: 13px 16px; border-radius: 8px; border: 1px solid #2a2a2a; background: #1a1a1a; color: #e0e0e0; font-size: 0.95rem; outline: none; transition: border 0.2s; }
+    .search-box input[type=text]:focus { border-color: #6366f1; }
     .btn-primary { padding: 13px 26px; border-radius: 8px; border: none; background: linear-gradient(90deg, #6366f1, #8b5cf6); color: white; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
     .btn-primary:hover { opacity: 0.88; }
     .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -23,7 +23,11 @@
     .btn-secondary:hover { background: #2a2a2a; color: #e0e0e0; }
     .btn-download { padding: 7px 14px; border-radius: 6px; border: none; background: #6366f1; color: white; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
     .btn-download:hover { opacity: 0.85; }
-    .status { padding: 13px 18px; border-radius: 8px; background: #1a1a1a; border: 1px solid #2a2a2a; margin-bottom: 22px; display: none; align-items: center; gap: 10px; font-size: 0.88rem; }
+    .status { padding: 13px 18px; border-radius: 8px; background: #1a1a1a; border: 1px solid #2a2a2a; margin-bottom: 22px; display: none; align-items: flex-start; gap: 10px; font-size: 0.88rem; }
+    .status .status-body { flex: 1; min-width: 0; }
+    .status .status-steps { margin-top: 8px; font-size: 0.78rem; color: #555; line-height: 1.5; max-height: 120px; overflow-y: auto; }
+    .status .status-steps div { color: #777; }
+    .status .status-steps div:last-child { color: #aaa; }
     .status.running { display: flex; border-color: #6366f1; color: #aaa; }
     .status.done { display: flex; border-color: #22c55e; color: #aaa; }
     .status.error { display: flex; border-color: #ef4444; color: #f87171; }
@@ -45,12 +49,15 @@
     .feedback { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; display: none; }
     .feedback .label { font-size: 0.7rem; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
     .feedback p { color: #888; font-size: 0.85rem; line-height: 1.6; }
-    .report-box { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 28px; display: none; margin-bottom: 28px; }
+    .report-box { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 28px; display: none; margin-bottom: 28px; max-width: 100%; overflow-x: auto; overflow-wrap: break-word; word-break: normal; }
     .report-box h1 { font-size: 1.4rem; margin-bottom: 14px; background: none; -webkit-text-fill-color: #e0e0e0; }
     .report-box h2 { font-size: 1.05rem; color: #6366f1; margin: 22px 0 10px; }
-    .report-box p { color: #bbb; font-size: 0.9rem; line-height: 1.75; margin-bottom: 12px; }
+    .report-box p { color: #bbb; font-size: 0.9rem; line-height: 1.75; margin-bottom: 12px; overflow-wrap: break-word; word-break: normal; }
     .report-box ul, .report-box ol { color: #bbb; font-size: 0.9rem; padding-left: 22px; margin-bottom: 12px; }
-    .report-box li { margin-bottom: 5px; line-height: 1.65; }
+    .report-box li { margin-bottom: 5px; line-height: 1.65; overflow-wrap: break-word; word-break: normal; }
+    /* Long bare URLs may still need soft breaks; keep normal word-breaking for titles/authors in the same line */
+    .report-box a { color: #818cf8; overflow-wrap: anywhere; word-break: normal; }
+    .report-box pre { overflow-x: auto; max-width: 100%; }
     .prev-section { display: none; border-top: 1px solid #1e1e1e; padding-top: 22px; margin-top: 8px; }
     .prev-label { font-size: 0.72rem; color: #444; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
     .prev-list { display: flex; flex-direction: column; gap: 8px; }
@@ -102,11 +109,71 @@
     if (e.key === 'Enter') runResearch();
   });
 
-  function setStatus(msg, type) {
+  function setStatus(msg, type, stepsHtml) {
     const el = document.getElementById('status');
     const dots = { running: 'purple', done: 'green', error: 'red' };
     el.className = 'status ' + type;
-    el.innerHTML = '<div class="dot ' + dots[type] + '"></div>' + msg;
+    const steps = stepsHtml
+      ? '<div class="status-steps">' + stepsHtml + '</div>'
+      : '';
+    el.innerHTML =
+      '<div class="dot ' + dots[type] + '"></div>' +
+      '<div class="status-body">' + msg + steps + '</div>';
+  }
+
+  function parseSseDataBlock(raw) {
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('data:')) {
+        try {
+          return JSON.parse(t.slice(5).trim());
+        } catch (e) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  function renderResearchResult(data) {
+    currentFilename = data.filename;
+    currentReport = data.report;
+
+    setStatus('Report generated and approved!', 'done');
+
+    const scoreKeys = ['relevance', 'completeness', 'clarity', 'structure', 'overall'];
+    const scoresEl = document.getElementById('scores');
+    scoresEl.style.display = 'grid';
+    scoresEl.innerHTML = scoreKeys.map(
+      k =>
+        '<div class="score-card' + (k === 'overall' ? ' overall' : '') + '">' +
+        '<div class="value">' + (data.scores[k] ?? '?') + '</div>' +
+        '<div class="label">' + k + '</div>' +
+        '</div>'
+    ).join('');
+
+    const metaEl = document.getElementById('meta');
+    metaEl.style.display = 'flex';
+    metaEl.innerHTML =
+      '<div class="meta-item">Duration: <span>' + data.duration_seconds + 's</span></div>' +
+      '<div class="meta-item">Revisions: <span>' + data.revisions + '</span></div>' +
+      '<div class="meta-item">Approved: <span class="green">' + (data.approved ? 'Yes' : 'No') + '</span></div>' +
+      '<div class="meta-actions">' +
+      '<button class="btn-secondary" onclick="copyReport()">Copy</button>' +
+      '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>' +
+      '</div>';
+
+    if (data.scores.feedback) {
+      const fb = document.getElementById('feedback');
+      fb.style.display = 'block';
+      fb.innerHTML = '<div class="label">Evaluator feedback</div><p>' + data.scores.feedback + '</p>';
+    }
+
+    const reportEl = document.getElementById('report');
+    reportEl.style.display = 'block';
+    reportEl.innerHTML = marked.parse(data.report);
+
+    loadPreviousReports();
   }
 
   function showToast(msg) {
@@ -163,55 +230,62 @@
     document.getElementById('meta').style.display = 'none';
     document.getElementById('report').style.display = 'none';
     document.getElementById('feedback').style.display = 'none';
-    setStatus('Pipeline running — searching, analysing, writing, reviewing...', 'running');
+    const stepLines = [];
+    function appendStepLine(text) {
+      stepLines.push(
+        '<div>' +
+          text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+          '</div>'
+      );
+      setStatus('<strong>Live progress</strong>', 'running', stepLines.join(''));
+    }
+    setStatus('<strong>Starting pipeline…</strong>', 'running');
 
     try {
-      const res = await fetch(API + '/research', {
+      const res = await fetch(API + '/research/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({ query }),
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
 
-      currentFilename = data.filename;
-      currentReport = data.report;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let gotComplete = false;
 
-      setStatus('Report generated and approved!', 'done');
-
-      const scoreKeys = ['relevance','completeness','clarity','structure','overall'];
-      const scoresEl = document.getElementById('scores');
-      scoresEl.style.display = 'grid';
-      scoresEl.innerHTML = scoreKeys.map(k =>
-        '<div class="score-card' + (k==='overall'?' overall':'') + '">' +
-          '<div class="value">' + (data.scores[k] ?? '?') + '</div>' +
-          '<div class="label">' + k + '</div>' +
-        '</div>'
-      ).join('');
-
-      const metaEl = document.getElementById('meta');
-      metaEl.style.display = 'flex';
-      metaEl.innerHTML =
-        '<div class="meta-item">Duration: <span>' + data.duration_seconds + 's</span></div>' +
-        '<div class="meta-item">Revisions: <span>' + data.revisions + '</span></div>' +
-        '<div class="meta-item">Approved: <span class="green">' + (data.approved ? 'Yes' : 'No') + '</span></div>' +
-        '<div class="meta-actions">' +
-          '<button class="btn-secondary" onclick="copyReport()">Copy</button>' +
-          '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>' +
-        '</div>';
-
-      if (data.scores.feedback) {
-        const fb = document.getElementById('feedback');
-        fb.style.display = 'block';
-        fb.innerHTML = '<div class="label">Evaluator feedback</div><p>' + data.scores.feedback + '</p>';
+      function handleEvent(data) {
+        if (!data || typeof data.type !== 'string') return;
+        if (data.type === 'step') {
+          appendStepLine(data.message || data.step || '');
+        } else if (data.type === 'complete') {
+          gotComplete = true;
+          renderResearchResult(data);
+        } else if (data.type === 'error') {
+          throw new Error(data.detail || 'Research failed');
+        }
       }
 
-      const reportEl = document.getElementById('report');
-      reportEl.style.display = 'block';
-      reportEl.innerHTML = marked.parse(data.report);
-
-      loadPreviousReports();
-
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(0), { stream: !done });
+        let sep;
+        while ((sep = buffer.indexOf('\n\n')) !== -1) {
+          const raw = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const data = parseSseDataBlock(raw);
+          handleEvent(data);
+        }
+        if (done) break;
+      }
+      if (buffer.trim()) {
+        const data = parseSseDataBlock(buffer);
+        handleEvent(data);
+      }
+      if (!gotComplete) throw new Error('Stream ended before the report was ready.');
     } catch(err) {
       setStatus('Error: ' + err.message, 'error');
     } finally {
