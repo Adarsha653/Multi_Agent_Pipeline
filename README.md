@@ -13,7 +13,18 @@ An autonomous multi-agent system that researches any topic end-to-end: web searc
 
 ## Live Demo
 
-Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pipeline
+**Space:** [Multi Agent Research Pipeline on Hugging Face Spaces](https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pipeline)
+
+### Deploying updates to this Space
+
+This repo’s [**Dockerfile**](Dockerfile) runs FastAPI with Uvicorn on port **7860** (the default for [Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-landing)).
+
+| How the Space is wired | What to do |
+| --- | --- |
+| **GitHub repository** linked in Space settings | Push to the connected branch (e.g. `main` on this GitHub repo). Hugging Face rebuilds from the Dockerfile; watch **Logs** / **Build** on the Space until it shows *Running*. |
+| **Git remote to the Space** | Use a [User Access Token](https://huggingface.co/settings/tokens) with write access; push your branch to the Space repo (see [Spaces and Git](https://huggingface.co/docs/hub/spaces-overview)). |
+
+**Space secrets** (Space → **Settings** → **Variables and secrets**): set **`GROQ_API_KEY`** (required for `/research` and for `/ready` to pass). Optional: **`PIPELINE_API_KEY`** if you enable API-key protection for POST `/research` / `/research/stream`.
 
 ---
 
