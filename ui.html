@@ -91,11 +91,19 @@
     <input type="text" id="query" placeholder="Ask anything... e.g. What are the latest AI breakthroughs in 2025?" />
     <button class="btn-primary" id="btn" onclick="runResearch()">Research</button>
   </div>
-  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:20px;">
-    <input type="file" id="pdfFile" accept=".pdf,application/pdf" style="display:none" />
-    <button type="button" class="btn-secondary" id="pdfPickBtn">Attach PDF…</button>
-    <button type="button" class="btn-secondary" id="pdfClearBtn" style="display:none;">Clear PDFs</button>
-    <span id="uploadStatus" style="font-size:0.82rem; color:#666;"></span>
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin-bottom:14px;">
+    <label style="font-size:0.82rem; color:#888;">Report format
+      <select id="reportFormat" style="margin-left:6px; padding:7px 12px; border-radius:6px; border:1px solid #2a2a2a; background:#1a1a1a; color:#ccc; font-size:0.85rem;">
+        <option value="markdown">Markdown sections</option>
+        <option value="bullets">Bullet-led</option>
+        <option value="executive_only">Executive summary only</option>
+        <option value="full_detailed">Full detailed</option>
+      </select>
+    </label>
+  </div>
+  <div id="historyWrap" style="display:none; margin-bottom:18px;">
+    <span style="font-size:0.75rem; color:#444; margin-right:8px;">Recent:</span>
+    <span id="historyChips" style="display:inline-flex; flex-wrap:wrap; gap:8px; vertical-align:middle;"></span>
   </div>
 
   <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px;" id="chips">
@@ -134,51 +142,82 @@
 
 <script>
   const API = '';
+  const LS_HISTORY = 'marp_recent_research';
+  const AGENT_LABELS = {
+    search_agent: 'Search',
+    analysis_agent: 'Analysis',
+    writer_agent: 'Writer',
+    critic_agent: 'Critic',
+    evaluator: 'Evaluator',
+  };
   let currentFilename = '';
   let currentReport = '';
-  let documentIds = [];
 
-  document.getElementById('pdfPickBtn').addEventListener('click', function () {
-    document.getElementById('pdfFile').click();
-  });
-  document.getElementById('pdfClearBtn').addEventListener('click', function () {
-    documentIds = [];
-    document.getElementById('uploadStatus').textContent = '';
-    document.getElementById('pdfClearBtn').style.display = 'none';
-    document.getElementById('pdfFile').value = '';
-  });
-  document.getElementById('pdfFile').addEventListener('change', async function (e) {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = '';
-    if (!f) return;
-    const st = document.getElementById('uploadStatus');
-    st.textContent = 'Uploading…';
+  function formatAgentSteps(agentSteps) {
+    if (!agentSteps || !agentSteps.length) return '';
+    return agentSteps
+      .map(function (s) {
+        var lab = AGENT_LABELS[s.agent] || s.agent;
+        var sec = s.seconds != null ? s.seconds : '?';
+        return lab + ': ' + sec + 's';
+      })
+      .join(' · ');
+  }
+
+  function pushRecentRun(entry) {
     try {
-      const fd = new FormData();
-      fd.append('file', f);
-      const res = await fetch(API + '/documents/upload', { method: 'POST', body: fd });
-      const text = await res.text();
-      if (!res.ok) {
-        let detail = text;
-        try {
-          const j = JSON.parse(text);
-          if (j && typeof j.detail === 'string') detail = j.detail;
-        } catch (_) {}
-        throw new Error(detail || 'Upload failed');
-      }
-      const data = JSON.parse(text);
-      if (data.document_id) documentIds.push(data.document_id);
-      st.textContent =
-        documentIds.length +
-        ' PDF(s) attached' +
-        (data.filename ? ' — last: ' + data.filename : '') +
-        (data.chunks_indexed != null ? ' (' + data.chunks_indexed + ' chunks)' : '');
-      document.getElementById('pdfClearBtn').style.display = documentIds.length ? 'inline-block' : 'none';
-    } catch (err) {
-      st.textContent = 'Upload failed: ' + (err.message || String(err));
-      document.getElementById('pdfClearBtn').style.display = documentIds.length ? 'inline-block' : 'none';
+      var raw = localStorage.getItem(LS_HISTORY);
+      var arr = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(arr)) arr = [];
+      var key = JSON.stringify({
+        q: entry.query,
+        f: entry.report_format || 'markdown',
+      });
+      arr = arr.filter(function (x) {
+        return JSON.stringify({ q: x.query, f: x.report_format || 'markdown' }) !== key;
+      });
+      arr.unshift({
+        query: entry.query,
+        report_format: entry.report_format || 'markdown',
+        at: Date.now(),
+      });
+      arr = arr.slice(0, 5);
+      localStorage.setItem(LS_HISTORY, JSON.stringify(arr));
+    } catch (e) {}
+    renderHistoryChips();
+  }
+
+  function renderHistoryChips() {
+    var wrap = document.getElementById('historyWrap');
+    var el = document.getElementById('historyChips');
+    if (!wrap || !el) return;
+    var arr = [];
+    try {
+      arr = JSON.parse(localStorage.getItem(LS_HISTORY) || '[]');
+    } catch (e) {}
+    if (!Array.isArray(arr) || !arr.length) {
+      wrap.style.display = 'none';
+      el.innerHTML = '';
+      return;
     }
-  });
+    wrap.style.display = 'block';
+    el.innerHTML = '';
+    arr.forEach(function (it) {
+      var q = it.query || '';
+      var short = q.length > 56 ? q.slice(0, 56) + '…' : q;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip history-chip';
+      b.textContent = short || '(empty)';
+      b.addEventListener('click', function () {
+        document.getElementById('query').value = it.query || '';
+        var rf = document.getElementById('reportFormat');
+        if (rf) rf.value = it.report_format || 'markdown';
+        runResearch();
+      });
+      el.appendChild(b);
+    });
+  }
 
   document.getElementById('query').addEventListener('keydown', e => {
     if (e.key === 'Enter') runResearch();
@@ -262,6 +301,12 @@
       currentFilename && !failed
         ? '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>'
         : '';
+    var timingStr = formatAgentSteps(data.agent_steps);
+    var timingHtml = timingStr
+      ? '<div class="meta-item" style="flex-basis:100%;"><span style="color:#888;">Step times</span> · <span>' +
+        timingStr.replace(/&/g, '&amp;').replace(/</g, '&lt;') +
+        '</span></div>'
+      : '';
     metaEl.innerHTML =
       '<div class="meta-item">Duration: <span>' + data.duration_seconds + 's</span></div>' +
       '<div class="meta-item">Revisions: <span>' + data.revisions + '</span></div>' +
@@ -273,7 +318,8 @@
       '<div class="meta-actions">' +
       '<button class="btn-secondary" onclick="copyReport()">Copy</button>' +
       downloadBtn +
-      '</div>';
+      '</div>' +
+      timingHtml;
 
     const fb = document.getElementById('feedback');
     if (failed && data.scores && data.scores.feedback) {
@@ -290,6 +336,13 @@
     const reportEl = document.getElementById('report');
     reportEl.style.display = 'block';
     reportEl.innerHTML = marked.parse(data.report);
+
+    if (!failed) {
+      pushRecentRun({
+        query: data.query || document.getElementById('query').value.trim(),
+        report_format: data.report_format || document.getElementById('reportFormat').value,
+      });
+    }
 
     loadPreviousReports();
   }
@@ -437,7 +490,10 @@
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
         },
-        body: JSON.stringify({ query, document_ids: documentIds }),
+        body: JSON.stringify({
+          query,
+          report_format: document.getElementById('reportFormat').value,
+        }),
       });
       if (!res.ok) {
         const t = await res.text();
@@ -496,6 +552,7 @@
   }
 
   loadPreviousReports();
+  renderHistoryChips();
 </script>
 </body>
 </html>

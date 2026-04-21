@@ -1,13 +1,10 @@
-from typing import TypedDict, Annotated, List
+from typing import TypedDict, Annotated, List, Dict, Any
 from langchain_core.messages import BaseMessage
 import operator
 
 class AgentState(TypedDict):
     # The original user query
     query: str
-
-    # Optional uploaded PDF ids (Qdrant document_id) to merge into retrieval
-    document_ids: List[str]
 
     # Set True after search_agent runs (even if zero hits — avoids supervisor deadlock)
     search_ran: bool
@@ -38,3 +35,9 @@ class AgentState(TypedDict):
 
     # Prior runs from utils/research_memory (JSON); injected at graph start, not mutated by agents
     memory_context: str
+
+    # Output shape for the writer (markdown | bullets | executive_only | full_detailed)
+    report_format: str
+
+    # Ordered list of {agent: str, seconds: float} for each completed worker step
+    agent_steps: List[Dict[str, Any]]

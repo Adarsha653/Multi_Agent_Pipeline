@@ -1,6 +1,9 @@
+import time
+
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from graph.state import AgentState
 from dotenv import load_dotenv
+from utils.agent_timing import append_step_duration
 from pydantic import BaseModel, Field
 from typing import Literal
 from utils.groq_llm import chat_groq
@@ -35,14 +38,20 @@ def _fallback_critic_invoke(state: AgentState, system_content: str) -> tuple[boo
 
 def critic_agent_node(state: AgentState) -> AgentState:
     print('Critic Agent: reviewing report...')
+    t0 = time.perf_counter()
     has_sources = bool(state.get('search_results'))
+    exec_only = (state.get('report_format') or '').strip().lower() == 'executive_only'
     citation_rule = (
-        'Retrieved sources were provided for this run (web and/or uploaded PDFs): the report MUST include a "## References" section with real APA 7th entries — not semicolon-separated catalog dumps. '
+        'Web results were provided for this run: the report MUST include a "## References" section with real APA 7th entries — not semicolon-separated catalog dumps. '
         'For **en.wikipedia.org** URLs, expect: *Wikipedia contributors.* (date). *Title.* *In Wikipedia.* Retrieved <date>, from <URL> — not `Wikipedia.` alone as author without *In Wikipedia.* '
-        'For **upload://** URLs (user PDFs), expect the gray-literature / unpublished PDF pattern from the writer instructions (verbatim upload URL in the reference). '
         'Factual claims should use inline [n] markers tied to those sources. If references are malformed or missing while the body cites sources, REVISE. '
-        if has_sources
-        else 'No sources were retrieved for this run: do not require ## References or [n] markers. '
+        if has_sources and not exec_only
+        else (
+            'This run used **executive summary only** format with sources: accept a compact `### Key sources` or a short ## References if the body is intentionally brief; do not REVISE solely because a full multi-section report is missing. '
+            'Inline [n] in the summary should still match the catalog when claims are sourced.'
+            if has_sources and exec_only
+            else 'No sources were retrieved for this run: do not require ## References or [n] markers. '
+        )
     )
     system_content = (
         'You are a report reviewer. If the report has a title, summary, findings, and conclusion and is relevant to the query, '
@@ -73,6 +82,7 @@ def critic_agent_node(state: AgentState) -> AgentState:
             print(f'   Critic Agent failed: {e2}')
             return {
                 **state,
+                **append_step_duration(state, 'critic_agent', t0),
                 'is_approved': True,
                 'critique': 'Critic failed, auto-approving',
                 'revision_count': revision_count,
@@ -86,6 +96,7 @@ def critic_agent_node(state: AgentState) -> AgentState:
 
     return {
         **state,
+        **append_step_duration(state, 'critic_agent', t0),
         'critique': critique,
         'is_approved': is_approved,
         'revision_count': revision_count,

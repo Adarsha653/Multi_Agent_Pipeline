@@ -7,7 +7,6 @@ def _state(**overrides):
     base = {
         'query': 'test query',
         'messages': [],
-        'document_ids': [],
         'search_ran': True,
         'search_results': [{'url': 'https://example.com', 'title': 't', 'content': 'c'}],
         'analysis': 'synthesized analysis',
@@ -17,6 +16,8 @@ def _state(**overrides):
         'next_agent': '',
         'revision_count': 0,
         'memory_context': '',
+        'report_format': 'markdown',
+        'agent_steps': [],
     }
     base.update(overrides)
     return base

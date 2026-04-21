@@ -23,6 +23,14 @@ _STEP_LABELS: dict[str, str] = {
     'critic_agent': 'Reviewing report…',
 }
 
+_ALLOWED_REPORT_FORMATS = frozenset({'markdown', 'bullets', 'executive_only', 'full_detailed'})
+
+
+def _normalize_report_format(fmt: str | None) -> str:
+    f = (fmt or 'markdown').strip().lower()
+    return f if f in _ALLOWED_REPORT_FORMATS else 'markdown'
+
+
 def route(state: AgentState) -> str:
     return state.get('next_agent', 'END')
 
@@ -47,15 +55,17 @@ def build_graph():
     graph.add_edge('critic_agent', 'supervisor')
     return graph.compile()
 
-def run_pipeline(query: str, document_ids: list[str] | None = None):
+def run_pipeline(
+    query: str,
+    report_format: str | None = None,
+):
     logger = PipelineLogger(query)
     start_time = time.time()
 
     memory_context = format_memory_for_prompt(query)
-    docs = [d.strip() for d in (document_ids or []) if d and str(d).strip()]
+    rf = _normalize_report_format(report_format)
     initial_state = {
         'query': query,
-        'document_ids': docs,
         'search_ran': False,
         'messages': [],
         'search_results': [],
@@ -66,13 +76,15 @@ def run_pipeline(query: str, document_ids: list[str] | None = None):
         'next_agent': '',
         'revision_count': 0,
         'memory_context': memory_context,
+        'report_format': rf,
+        'agent_steps': [],
     }
 
     pipeline = build_graph()
     print(f'\nRunning pipeline for: {query}\n')
 
     logger.start_agent('full_pipeline')
-    result = pipeline.invoke(initial_state)
+    result = dict(pipeline.invoke(initial_state))
     total_time = round(time.time() - start_time, 2)
     logger.end_agent('full_pipeline', {'total_seconds': total_time})
 
@@ -84,7 +96,12 @@ def run_pipeline(query: str, document_ids: list[str] | None = None):
     if is_pipeline_failure_report(result.get('report')):
         scores = skipped_eval_scores()
     else:
+        t_eval = time.perf_counter()
         scores = evaluate_report(query, result['report'], result['search_results'])
+        eval_s = round(time.perf_counter() - t_eval, 2)
+        steps = list(result.get('agent_steps') or [])
+        steps.append({'agent': 'evaluator', 'seconds': eval_s})
+        result['agent_steps'] = steps
 
     print(f'\nTotal pipeline time: {total_time}s')
     print(f'Revisions made: {result["revision_count"]}')
@@ -96,7 +113,10 @@ def run_pipeline(query: str, document_ids: list[str] | None = None):
     return result, scores
 
 
-def iter_research_events(query: str, document_ids: list[str] | None = None) -> Iterator[dict[str, Any]]:
+def iter_research_events(
+    query: str,
+    report_format: str | None = None,
+) -> Iterator[dict[str, Any]]:
     """
     Run the graph once while yielding progress dicts for SSE.
     Yields: {"type": "step", "step": str, "message": str}, then {"type": "complete", ...}.
@@ -104,10 +124,9 @@ def iter_research_events(query: str, document_ids: list[str] | None = None) -> I
     logger = PipelineLogger(query)
     start_time = time.time()
     memory_context = format_memory_for_prompt(query)
-    docs = [d.strip() for d in (document_ids or []) if d and str(d).strip()]
+    rf = _normalize_report_format(report_format)
     initial_state: AgentState = {
         'query': query,
-        'document_ids': docs,
         'search_ran': False,
         'messages': [],
         'search_results': [],
@@ -118,6 +137,8 @@ def iter_research_events(query: str, document_ids: list[str] | None = None) -> I
         'next_agent': '',
         'revision_count': 0,
         'memory_context': memory_context,
+        'report_format': rf,
+        'agent_steps': [],
     }
     pipeline = build_graph()
     print(f'\nRunning pipeline for: {query}\n')
@@ -142,7 +163,14 @@ def iter_research_events(query: str, document_ids: list[str] | None = None) -> I
     if is_pipeline_failure_report(final_state.get('report')):
         scores = skipped_eval_scores()
     else:
+        t_eval = time.perf_counter()
         scores = evaluate_report(query, final_state.get('report', ''), final_state.get('search_results') or [])
+        eval_s = round(time.perf_counter() - t_eval, 2)
+        fs = dict(final_state)
+        steps = list(fs.get('agent_steps') or [])
+        steps.append({'agent': 'evaluator', 'seconds': eval_s})
+        fs['agent_steps'] = steps
+        final_state = fs
 
     print(f'\nTotal pipeline time: {total_time}s')
     print(f'Revisions made: {final_state.get("revision_count", 0)}')
@@ -159,6 +187,7 @@ def iter_research_events(query: str, document_ids: list[str] | None = None) -> I
             'report': final_state.get('report', ''),
             'is_approved': final_state.get('is_approved', False),
             'revision_count': final_state.get('revision_count', 0),
+            'agent_steps': final_state.get('agent_steps') or [],
         },
     }
 

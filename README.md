@@ -7,7 +7,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.135.3-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-An autonomous multi-agent system that researches any topic end-to-end: web search (with optional **PDF RAG** via Qdrant and local embeddings), synthesis, a structured markdown report, critic revisions, automatic scoring, and optional **cross-session memory** (JSON on disk). Built on a free-tier friendly stack (Groq, DuckDuckGo, open-source libraries). **pytest** runs in CI; optional **API keys** and **rate limits** protect research and report routes (see `.env.example`).
+An autonomous multi-agent system that researches any topic end-to-end: web search, synthesis, a structured markdown report, critic revisions, automatic scoring, and optional **cross-session memory** (JSON on disk). Built on a free-tier friendly stack (Groq, DuckDuckGo, open-source libraries). **pytest** runs in CI; optional **API keys** and **rate limits** protect research and report routes (see `.env.example`).
 
 ---
 
@@ -22,9 +22,9 @@ Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pi
 | Agent | Role |
 | --- | --- |
 | Supervisor | Pure logic routing — decides which agent runs next (no LLM call) |
-| Search Agent | Generates 3 diverse sub-queries (overview / recent / deeper angle) and up to 9 primary DDGS hits (3×3, deduped + trimmed); sparse sub-queries pull **alternate DDGS** phrasing and **Wikipedia**; optional **PDF RAG** chunks (Qdrant + local embeddings) are merged first when **`document_ids`** are supplied |
-| Analysis Agent | Synthesizes raw results into structured insights |
-| Writer Agent | Produces a formatted markdown report with revision support when the critic requests changes |
+| Search Agent | Generates 3 diverse sub-queries (overview / recent / deeper angle) and up to 9 primary DDGS hits (3×3, deduped + trimmed); sparse sub-queries pull **alternate DDGS** phrasing and **Wikipedia** |
+| Analysis Agent | Synthesizes raw results into structured insights; adds a **Source support overview** (multi-source vs single-source vs limited evidence) when web results exist |
+| Writer Agent | Produces the final report with revision support when the critic requests changes; output shape follows **`report_format`** (markdown sections, bullet-led, executive-only, or full detailed) |
 | Critic Agent | Reviews the report and returns APPROVED or REVISE |
 | Evaluator | Scores the final report on relevance, completeness, clarity, structure, and overall (1–10) plus short feedback |
 
@@ -38,7 +38,6 @@ Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pi
 | LLM framework | LangChain | Free (OSS) |
 | LLM | Llama 3.3 70B via Groq | Free tier |
 | Web search | DuckDuckGo (`ddgs`); **Wikipedia** opensearch when DDGS returns fewer than **`WEB_SEARCH_SPARSE_THRESHOLD`** hits | Free |
-| Optional PDF RAG | **Qdrant** + **sentence-transformers** (local embeddings); see **API endpoints** and **`.env.example`** | Free (OSS); Qdrant is self-hosted or cloud |
 | API | FastAPI + Uvicorn | Free (OSS) |
 
 **Total cost to run:** $0 on free tiers (Groq API key required).
@@ -67,7 +66,7 @@ Multi_Agent_Pipeline/
 ├── utils/
 │   ├── logger.py
 │   ├── groq_llm.py
-│   ├── rag_store.py
+│   ├── agent_timing.py
 │   ├── research_memory.py
 │   ├── report_outcome.py
 │   └── api_auth.py
@@ -80,7 +79,7 @@ Multi_Agent_Pipeline/
 │   ├── test_research_memory.py
 │   ├── test_report_outcome.py
 │   ├── test_evaluator_quota.py
-│   └── test_rag_chunking.py
+│   └── test_agent_timing.py
 ├── .github/
 │   └── workflows/ci.yml
 ├── reports/          # optional local artifacts / examples
@@ -156,26 +155,23 @@ Then open `http://localhost:8000/` for `ui.html`. The Docker image uses `uvicorn
 | GET | `/` | Serves the web UI (`ui.html`) |
 | POST | `/research` | Runs the full pipeline; saves the markdown report under `/tmp/reports` |
 | POST | `/research/stream` | Same pipeline as **`/research`**, but responds with **Server-Sent Events** (`text/event-stream`): **`type: step`** messages during the graph, then one **`type: complete`** JSON payload (same shape as **`/research`**) after the report is scored and saved |
-| POST | `/documents/upload` | Multipart **PDF** upload → chunk, **sentence-transformers** embeddings, **Qdrant** upsert; returns **`document_id`**. Use the same auth as **`POST /research`** when **`PIPELINE_API_KEY`** is set. |
 | GET | `/reports` | Lists saved reports **newest first** (by file mtime). Each entry: **`filename`**, **`generated_at`** (local `YYYY-MM-DD HH:MM:SS`). Files whose body contains a pipeline **failure stub** (`Report generation failed:` / `Analysis failed:`) are **omitted** (they are not re-saved on new runs; old ones are hidden from this list). |
 | GET | `/reports/{filename}` | Returns report metadata and markdown content |
 | GET | `/reports/{filename}/download` | Downloads the report as a file |
 | GET | `/health` | Liveness — process up (no auth, not rate-limited) |
 | GET | `/ready` | Readiness — **503** if `GROQ_API_KEY` missing (no Groq call) |
 
-Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST /research`**, **`POST /research/stream`**, and **`POST /documents/upload`**; **`PIPELINE_REPORTS_API_KEY`** or the same pipeline key for **`GET /reports*`**. Rate limits use **`slowapi`** (configurable via env). The bundled **`ui.html`** does not send API keys—leave keys unset for a public browser demo, or use **`curl`** / a custom client with **`X-API-Key`** when keys are enabled.
+Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST /research`** and **`POST /research/stream`**; **`PIPELINE_REPORTS_API_KEY`** or the same pipeline key for **`GET /reports*`**. Rate limits use **`slowapi`** (configurable via env). The bundled **`ui.html`** does not send API keys—leave keys unset for a public browser demo, or use **`curl`** / a custom client with **`X-API-Key`** when keys are enabled.
 
-**PDF RAG (optional):** Start **Qdrant** (for example `docker run -p 6333:6333 qdrant/qdrant`), set **`QDRANT_URL`** if not on localhost, upload a PDF with **`POST /documents/upload`**, then call **`POST /research`** or **`/research/stream`** with JSON **`{"query": "...", "document_ids": ["<document_id>"]}`**. Retrieved chunks are merged **before** web hits so they appear first in the source list. See **`.env.example`** for **`RAG_*`** tuning.
+**Research JSON body (`POST /research`, `POST /research/stream`):** `query` (string, required), optional **`report_format`** — `markdown` (default), `bullets`, `executive_only`, or `full_detailed`. Successful responses include **`agent_steps`**: an ordered list of `{ "agent": "search_agent" | "analysis_agent" | "writer_agent" | "critic_agent" | "evaluator", "seconds": number }` for per-stage wall time (writer/critic may repeat when the critic requests revisions). The web UI exposes format selection, step times after a run, and the last **five** queries in **localStorage** for one-click re-run.
 
 ---
 
 ## How it works
 
-Users can run **web-only** research, or **add uploaded PDFs**: `POST /documents/upload` stores chunked text in **Qdrant** with embeddings; sending **`document_ids`** on **`/research`** or **`/research/stream`** turns on **RAG** (semantic retrieval from those PDFs merged with web search). Qdrant must be running for upload/RAG; see **API endpoints** above.
-
-1. The user submits a query (CLI or API), optionally after attaching one or more PDFs in the UI (or via the upload API).
+1. The user submits a query (CLI or API).
 2. The **Supervisor** uses deterministic rules to choose the next step.
-3. The **Search Agent** builds 3 queries and fetches up to 9 primary DuckDuckGo hits per run (plus alternate-query / Wikipedia fills when a sub-query is sparse). If **`document_ids`** are set, **Qdrant** retrieval for uploaded PDFs is merged **before** web results.
+3. The **Search Agent** builds 3 queries and fetches up to 9 primary DuckDuckGo hits per run (plus alternate-query / Wikipedia fills when a sub-query is sparse).
 4. **Research memory** (if any prior runs exist) is loaded into **`memory_context`** so analysis and writing can reference earlier topics without treating them as live web sources.
 5. The **Analysis Agent** turns raw hits into structured analysis.
 6. The **Writer Agent** drafts a markdown report (title, summary, findings, analysis, conclusion).

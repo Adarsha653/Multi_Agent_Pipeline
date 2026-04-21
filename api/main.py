@@ -1,14 +1,15 @@
 import json
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 import os as _os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from graph.pipeline import iter_research_events, run_pipeline
-from utils.rag_store import ingest_pdf_bytes
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 import logging
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 RESEARCH_RATE_LIMIT = os.getenv('RESEARCH_RATE_LIMIT', '30/minute')
 READ_REPORTS_RATE_LIMIT = os.getenv('READ_REPORTS_RATE_LIMIT', '120/minute')
-UPLOAD_RATE_LIMIT = os.getenv('UPLOAD_RATE_LIMIT', '20/minute')
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -95,15 +95,12 @@ def _persist_report(
     return filepath, filename
 
 
+ReportFormat = Literal['markdown', 'bullets', 'executive_only', 'full_detailed']
+
+
 class QueryRequest(BaseModel):
     query: str
-    document_ids: list[str] = Field(default_factory=list)
-
-
-class UploadResponse(BaseModel):
-    document_id: str
-    filename: str
-    chunks_indexed: int
+    report_format: ReportFormat = 'markdown'
 
 
 class ReportResponse(BaseModel):
@@ -115,6 +112,8 @@ class ReportResponse(BaseModel):
     duration_seconds: float
     report_file: str
     filename: str
+    agent_steps: list[dict] = Field(default_factory=list)
+    report_format: ReportFormat = 'markdown'
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -143,52 +142,6 @@ def ready():
     return {'status': 'ready', 'groq': 'configured'}
 
 
-@app.post('/documents/upload', response_model=UploadResponse)
-@limiter.limit(UPLOAD_RATE_LIMIT)
-async def upload_document(
-    request: Request,
-    file: UploadFile = File(...),
-    _auth: None = Depends(pipeline_api_key_dependency),
-):
-    """Upload a PDF, chunk + embed locally, store in Qdrant; returns document_id for POST /research `document_ids`."""
-    name = (file.filename or '').strip()
-    if not name.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail='Only PDF files are supported')
-    content = await file.read()
-    if len(content) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail='PDF too large (max 25 MB)')
-    if not content.startswith(b'%PDF'):
-        raise HTTPException(status_code=400, detail='File is not a valid PDF')
-    try:
-        doc_id, n = ingest_pdf_bytes(content, name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    except Exception as e:
-        logger.exception('POST /documents/upload failed')
-        q_url = (os.getenv('QDRANT_URL') or 'http://127.0.0.1:6333').strip()
-        low = str(e).lower()
-        if (
-            'connection refused' in low
-            or 'errno 61' in low
-            or 'failed to connect' in low
-            or 'connecterror' in low.replace(' ', '')
-        ):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f'Cannot connect to Qdrant at {q_url} (connection refused). '
-                    'Start Qdrant before uploading, e.g. `docker run -p 6333:6333 qdrant/qdrant`, '
-                    'or set QDRANT_URL if it runs on another host/port. '
-                    'The PDF size is fine; indexing needs a running vector database.'
-                ),
-            ) from None
-        raise HTTPException(
-            status_code=503,
-            detail='Could not index the PDF. Check server logs, QDRANT_URL, and that Qdrant accepts writes.',
-        ) from None
-    return UploadResponse(document_id=doc_id, filename=name, chunks_indexed=n)
-
-
 @app.post('/research', response_model=ReportResponse)
 @limiter.limit(RESEARCH_RATE_LIMIT)
 def run_research(
@@ -200,7 +153,7 @@ def run_research(
         raise HTTPException(status_code=400, detail='Query cannot be empty')
     try:
         start = time.time()
-        result, scores = run_pipeline(payload.query, payload.document_ids)
+        result, scores = run_pipeline(payload.query, payload.report_format)
         duration = round(time.time() - start, 2)
         if is_pipeline_failure_report(result.get('report')):
             filepath, filename = '', ''
@@ -220,7 +173,9 @@ def run_research(
             revisions=result['revision_count'],
             duration_seconds=duration,
             report_file=filepath,
-            filename=filename
+            filename=filename,
+            agent_steps=result.get('agent_steps') or [],
+            report_format=payload.report_format,
         )
     except Exception as e:
         logger.exception('POST /research failed')
@@ -255,7 +210,7 @@ def research_stream(
     def event_generator():
         pending_complete = None
         try:
-            for ev in iter_research_events(payload.query, payload.document_ids):
+            for ev in iter_research_events(payload.query, payload.report_format):
                 if ev.get('type') == 'complete':
                     pending_complete = ev
                     continue
@@ -275,6 +230,7 @@ def research_stream(
                 out = {
                     'type': 'complete',
                     'query': payload.query,
+                    'report_format': payload.report_format,
                     'report': r['report'],
                     'scores': pending_complete['scores'],
                     'approved': r['is_approved'],
@@ -282,6 +238,7 @@ def research_stream(
                     'duration_seconds': pending_complete['duration_seconds'],
                     'report_file': path,
                     'filename': fname,
+                    'agent_steps': r.get('agent_steps') or [],
                 }
                 yield f'data: {json.dumps(out)}\n\n'
         except Exception as e:

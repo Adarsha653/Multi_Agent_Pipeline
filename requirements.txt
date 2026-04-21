@@ -22,12 +22,6 @@ slowapi==0.1.9
 python-dotenv==1.2.2
 requests==2.33.1
 httpx==0.28.1
-python-multipart==0.0.20
-
-# RAG (optional — PDF upload + Qdrant + local embeddings; torch is pulled in by sentence-transformers)
-qdrant-client==1.17.1
-sentence-transformers==5.4.1
-pypdf==6.10.2
 
 # Testing (Fix #7)
 pytest==8.3.5

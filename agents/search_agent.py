@@ -1,23 +1,19 @@
+import time
+
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from tools.search_tools import web_search, dedupe_and_trim_search_results, merge_search_results
+from tools.search_tools import web_search, dedupe_and_trim_search_results
 from graph.state import AgentState
 from dotenv import load_dotenv
 from utils.groq_llm import chat_groq, user_message_for_groq_limit
-from utils.rag_store import search_results_from_rag
+from utils.agent_timing import append_step_duration
 
 load_dotenv()
 llm = chat_groq()
 
 def search_agent_node(state: AgentState) -> AgentState:
     print('Search Agent: generating search queries...')
+    t0 = time.perf_counter()
     try:
-        doc_ids = state.get('document_ids') or []
-        rag_hits: list[dict] = []
-        if doc_ids:
-            print(f'   RAG: retrieving chunks for {len(doc_ids)} document(s)…')
-            rag_hits = search_results_from_rag(state['query'], doc_ids)
-            print(f'   RAG: {len(rag_hits)} chunk(s)')
-
         response = llm.invoke([
             SystemMessage(content=(
                 'You are a research assistant. Given a topic, generate exactly 3 simple plain-English web search queries as a numbered list. '
@@ -38,17 +34,14 @@ def search_agent_node(state: AgentState) -> AgentState:
             except Exception as e:
                 print(f'   Search failed for query [{q}]: {e}')
         raw_n = len(all_results)
-        web_trimmed = dedupe_and_trim_search_results(all_results)
-        combined = dedupe_and_trim_search_results(merge_search_results(rag_hits, web_trimmed))
-        print(
-            f'   Web: {raw_n} raw hits → {len(web_trimmed)} unique; '
-            f'with RAG: {len(combined)} total (deduped, snippets trimmed)'
-        )
-        if not combined:
+        all_results = dedupe_and_trim_search_results(all_results)
+        print(f'   Retrieved {raw_n} raw hits → {len(all_results)} unique (deduped, snippets trimmed)')
+        if not all_results:
             print('   WARNING: No results retrieved — pipeline will continue with empty results')
         return {
             **state,
-            'search_results': combined,
+            **append_step_duration(state, 'search_agent', t0),
+            'search_results': all_results,
             'search_ran': True,
             'messages': state['messages'] + [
                 AIMessage(content=f"Search Agent retrieved {len(combined)} results for: {state['query']}")
@@ -59,6 +52,7 @@ def search_agent_node(state: AgentState) -> AgentState:
         user_msg = user_message_for_groq_limit(e)
         return {
             **state,
+            **append_step_duration(state, 'search_agent', t0),
             'search_results': [],
             'search_ran': True,
             'messages': state['messages'] + [AIMessage(content=f'Search Agent failed: {user_msg}')],
