@@ -44,7 +44,7 @@ def search_agent_node(state: AgentState) -> AgentState:
             'search_results': all_results,
             'search_ran': True,
             'messages': state['messages'] + [
-                AIMessage(content=f"Search Agent retrieved {len(combined)} results for: {state['query']}")
+                AIMessage(content=f"Search Agent retrieved {len(all_results)} results for: {state['query']}")
             ],
         }
     except Exception as e:

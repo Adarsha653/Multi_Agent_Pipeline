@@ -24,5 +24,26 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Verify imports (no Groq calls)
+        run: |
+          python -c "
+          import agents.analysis_agent
+          import agents.critic_agent
+          import agents.search_agent
+          import agents.supervisor
+          import agents.writer_agent
+          import api.main
+          import eval.evaluator
+          import graph.pipeline
+          import graph.state
+          import tools.search_tools
+          import utils.agent_timing
+          import utils.api_auth
+          import utils.groq_llm
+          import utils.report_outcome
+          import utils.research_memory
+          print('All imports OK')
+          "
+
       - name: Run pytest
         run: python -m pytest tests/ -q --tb=short

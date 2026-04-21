@@ -1,0 +1,13 @@
+# Local full stack: API + web UI (same image as Dockerfile).
+# Usage: export GROQ_API_KEY=...  OR  put GROQ_API_KEY in a .env file next to this file (Compose reads it for ${...}).
+# Then: docker compose up --build
+# Open http://localhost:8000 — container listens on 7860, mapped to host 8000.
+
+services:
+  api:
+    build: .
+    container_name: multi-agent-research-api
+    ports:
+      - "8000:7860"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}

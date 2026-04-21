@@ -44,6 +44,14 @@ Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pi
 
 ---
 
+## CI and tests
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every **push** and **pull request** to **`main`** / **`master`**: install dependencies, **verify imports** for main packages (no Groq calls), then **`pytest`**.
+
+Agent behaviour is covered with **mocked LLMs** in `tests/test_*_agent_unit.py` (search, analysis, writer, critic) plus existing routing, API, search-tool, and health tests in **`tests/`**.
+
+---
+
 ## Project structure
 
 ```
@@ -71,7 +79,12 @@ Multi_Agent_Pipeline/
 │   ├── report_outcome.py
 │   └── api_auth.py
 ├── tests/
+│   ├── conftest.py
 │   ├── test_supervisor.py
+│   ├── test_search_agent_unit.py
+│   ├── test_analysis_agent_unit.py
+│   ├── test_writer_agent_unit.py
+│   ├── test_critic_agent_unit.py
 │   ├── test_search_tools.py
 │   ├── test_api_auth.py
 │   ├── test_report_routes_auth.py
@@ -86,6 +99,7 @@ Multi_Agent_Pipeline/
 ├── logs/             # session logs from PipelineLogger
 ├── ui.html
 ├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
 └── .env.example
 ```
@@ -145,6 +159,16 @@ uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Then open `http://localhost:8000/` for `ui.html`. The Docker image uses `uvicorn` on port **7860** (Hugging Face Spaces convention).
+
+7. **Docker Compose (full stack in one command)**
+
+From the repo root, set **`GROQ_API_KEY`** (e.g. in a `.env` file next to `docker-compose.yml` so Compose can substitute `${GROQ_API_KEY}`), then:
+
+```bash
+docker compose up --build
+```
+
+Open **`http://localhost:8000`** — the app is mapped from container port **7860** to host **8000**. Stop with `Ctrl+C` or `docker compose down`.
 
 ---
 
