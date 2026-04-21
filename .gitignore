@@ -1,3 +1,6 @@
+# Local research memory (queries + summaries from past runs)
+data/research_memory.json
+
 # Environment variables
 .env
 .env.*

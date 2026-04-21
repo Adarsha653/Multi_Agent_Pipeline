@@ -2,10 +2,25 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 import json
 from pydantic import BaseModel, Field
-from utils.groq_llm import chat_groq
+from utils.groq_llm import chat_groq, is_groq_rate_or_token_limit
 
 load_dotenv()
 llm = chat_groq()
+
+
+def _scores_when_quota_exceeded() -> dict:
+    """No extra LLM calls; UI can show '?' for null dimensions."""
+    return {
+        'relevance': None,
+        'completeness': None,
+        'clarity': None,
+        'structure': None,
+        'overall': None,
+        'feedback': (
+            'Automated scoring was skipped because the Groq API returned a rate limit (HTTP 429). '
+            'The research pipeline still completed; try again later or check usage at https://console.groq.com/'
+        ),
+    }
 
 
 class ReportEvaluation(BaseModel):
@@ -18,14 +33,27 @@ class ReportEvaluation(BaseModel):
 
 
 def _fallback_scores_from_text(query: str, report: str, sources: str) -> dict:
-    response = llm.invoke([
-        SystemMessage(
-            content='You are an objective evaluator. Score the report on each dimension from 1-10. Return ONLY valid JSON, nothing else. Format: {"relevance": 8, "completeness": 7, "clarity": 9, "structure": 8, "overall": 8, "feedback": "brief feedback here"}'
-        ),
-        HumanMessage(
-            content=f'Query: {query}\n\nSources used:\n{sources}\n\nReport:\n{report}\n\nScore this report on: relevance (does it answer the query?), completeness (covers all important points?), clarity (easy to understand?), structure (well organized?), overall.'
-        ),
-    ])
+    try:
+        response = llm.invoke([
+            SystemMessage(
+                content='You are an objective evaluator. Score the report on each dimension from 1-10. Return ONLY valid JSON, nothing else. Format: {"relevance": 8, "completeness": 7, "clarity": 9, "structure": 8, "overall": 8, "feedback": "brief feedback here"}'
+            ),
+            HumanMessage(
+                content=f'Query: {query}\n\nSources used:\n{sources}\n\nReport:\n{report}\n\nScore this report on: relevance (does it answer the query?), completeness (covers all important points?), clarity (easy to understand?), structure (well organized?), overall.'
+            ),
+        ])
+    except Exception as e:
+        print(f'   JSON fallback evaluation failed ({e}).')
+        if is_groq_rate_or_token_limit(e):
+            return _scores_when_quota_exceeded()
+        return {
+            'relevance': 0,
+            'completeness': 0,
+            'clarity': 0,
+            'structure': 0,
+            'overall': 0,
+            'feedback': 'Evaluation failed (no API response).',
+        }
     try:
         text = response.content.strip()
         start = text.find('{')
@@ -38,7 +66,7 @@ def _fallback_scores_from_text(query: str, report: str, sources: str) -> dict:
             'clarity': 0,
             'structure': 0,
             'overall': 0,
-            'feedback': 'Evaluation failed',
+            'feedback': 'Evaluation failed (could not parse JSON).',
         }
 
 
@@ -62,7 +90,11 @@ def evaluate_report(query: str, report: str, search_results: list) -> dict:
             scores = ReportEvaluation.model_validate(out).model_dump()
     except Exception as e:
         print(f'   Structured evaluation failed ({e}); using JSON fallback.')
-        scores = _fallback_scores_from_text(query, report, sources)
+        if is_groq_rate_or_token_limit(e):
+            print('   Rate limit detected; skipping second LLM call for JSON fallback.')
+            scores = _scores_when_quota_exceeded()
+        else:
+            scores = _fallback_scores_from_text(query, report, sources)
 
     print('\n' + '=' * 50)
     print('EVALUATION SCORES')

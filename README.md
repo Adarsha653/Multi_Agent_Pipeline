@@ -22,7 +22,7 @@ Hugging Face Space: https://huggingface.co/spaces/AdarshaAryal653/multi-agent-pi
 | Agent | Role |
 | --- | --- |
 | Supervisor | Pure logic routing — decides which agent runs next (no LLM call) |
-| Search Agent | Generates 3 diverse sub-queries (overview / recent / deeper angle) and up to 9 primary DDGS hits (3×3, deduped + trimmed); sparse sub-queries pull **alternate DDGS** phrasing and **Wikipedia** |
+| Search Agent | Generates 3 diverse sub-queries (overview / recent / deeper angle) and up to 9 primary DDGS hits (3×3, deduped + trimmed); sparse sub-queries pull **alternate DDGS** phrasing and **Wikipedia**; optional **PDF RAG** chunks (Qdrant + local embeddings) are merged first when **`document_ids`** are supplied |
 | Analysis Agent | Synthesizes raw results into structured insights |
 | Writer Agent | Produces a formatted markdown report with revision support when the critic requests changes |
 | Critic Agent | Reviews the report and returns APPROVED or REVISE |
@@ -66,6 +66,7 @@ Multi_Agent_Pipeline/
 ├── utils/
 │   ├── logger.py
 │   ├── groq_llm.py
+│   ├── rag_store.py
 │   └── api_auth.py
 ├── tests/
 │   ├── test_supervisor.py
@@ -148,13 +149,16 @@ Then open `http://localhost:8000/` for `ui.html`. The Docker image uses `uvicorn
 | GET | `/` | Serves the web UI (`ui.html`) |
 | POST | `/research` | Runs the full pipeline; saves the markdown report under `/tmp/reports` |
 | POST | `/research/stream` | Same pipeline as **`/research`**, but responds with **Server-Sent Events** (`text/event-stream`): **`type: step`** messages during the graph, then one **`type: complete`** JSON payload (same shape as **`/research`**) after the report is scored and saved |
-| GET | `/reports` | Lists saved report filenames |
+| POST | `/documents/upload` | Multipart **PDF** upload → chunk, **sentence-transformers** embeddings, **Qdrant** upsert; returns **`document_id`**. Use the same auth as **`POST /research`** when **`PIPELINE_API_KEY`** is set. |
+| GET | `/reports` | Lists saved reports **newest first** (by file mtime). Each entry: **`filename`**, **`generated_at`** (local `YYYY-MM-DD HH:MM:SS`). Files whose body contains a pipeline **failure stub** (`Report generation failed:` / `Analysis failed:`) are **omitted** (they are not re-saved on new runs; old ones are hidden from this list). |
 | GET | `/reports/{filename}` | Returns report metadata and markdown content |
 | GET | `/reports/{filename}/download` | Downloads the report as a file |
 | GET | `/health` | Liveness — process up (no auth, not rate-limited) |
 | GET | `/ready` | Readiness — **503** if `GROQ_API_KEY` missing (no Groq call) |
 
-Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST /research`** and **`POST /research/stream`**; **`PIPELINE_REPORTS_API_KEY`** or the same pipeline key for **`GET /reports*`**. Rate limits use **`slowapi`** (configurable via env). The bundled **`ui.html`** does not send API keys—leave keys unset for a public browser demo, or use **`curl`** / a custom client with **`X-API-Key`** when keys are enabled.
+Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST /research`**, **`POST /research/stream`**, and **`POST /documents/upload`**; **`PIPELINE_REPORTS_API_KEY`** or the same pipeline key for **`GET /reports*`**. Rate limits use **`slowapi`** (configurable via env). The bundled **`ui.html`** does not send API keys—leave keys unset for a public browser demo, or use **`curl`** / a custom client with **`X-API-Key`** when keys are enabled.
+
+**PDF RAG (optional):** Start **Qdrant** (for example `docker run -p 6333:6333 qdrant/qdrant`), set **`QDRANT_URL`** if not on localhost, upload a PDF with **`POST /documents/upload`**, then call **`POST /research`** or **`/research/stream`** with JSON **`{"query": "...", "document_ids": ["<document_id>"]}`**. Retrieved chunks are merged **before** web hits so they appear first in the source list. See **`.env.example`** for **`RAG_*`** tuning.
 
 ---
 
@@ -168,7 +172,7 @@ Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST
 | **4** | Structured LLM output | **Critic** and **evaluator** use Pydantic + **`with_structured_output`**, with string/JSON **fallbacks** if parsing fails. |
 | **5** | Code hygiene | Removed unused **Groq** imports from **`supervisor.py`** (routing stays pure logic). |
 | **6** | Resilience | Shared **`utils/groq_llm.py`** (**timeout**, **retries**); **DDGS** retries with backoff; **`POST /research`** returns generic **500** / **503** on timeout and logs server-side. |
-| **7** | Tests | **`pytest`** + **`tests/test_supervisor.py`**, **`test_search_tools.py`**, **`test_api_auth.py`**. |
+| **7** | Tests | **`pytest`** + **`tests/test_supervisor.py`**, **`test_search_tools.py`**, **`test_api_auth.py`**, **`test_research_memory.py`**. |
 | **8** | API gate + limits | Optional **`PIPELINE_API_KEY`** on **`/research`**; **`slowapi`** per-IP limits. Send **`X-API-Key`** from **`curl`**, proxies, or custom clients when keys are set (the bundled **`ui.html`** does not collect keys). |
 | **9** | CI | **`.github/workflows/ci.yml`** runs **`pytest`** on push/PR to **`main`** / **`master`**. |
 | **10** | Report auth | Same key dependency on **`GET /reports`** routes when **`PIPELINE_API_KEY`** is set. |
@@ -176,6 +180,7 @@ Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST
 | **12** | Least privilege | Optional **`PIPELINE_REPORTS_API_KEY`** on report routes **or** **`PIPELINE_API_KEY`**; **`POST /research`** still **only** **`PIPELINE_API_KEY`**. Use **`curl`** / API clients with headers when keys are enabled. |
 | **13** | Query planning | Search agent system prompt asks for **three distinct angles** (overview, recent, deeper) to reduce redundant queries. |
 | **14** | Streaming UX | **`POST /research/stream`** emits **SSE** step events from **`iter_research_events`** in **`graph/pipeline.py`**; **`ui.html`** consumes the stream and shows live progress. |
+| **15** | Cross-session memory | **`utils/research_memory.py`** stores each run’s query plus **Executive Summary** text in **`data/research_memory.json`** (gitignored). **`format_memory_for_prompt`** ranks prior topics vs the new query and injects **`memory_context`** into analysis and writer prompts. |
 
 *Not implemented (optional later): Redis-backed rate limits, dedicated fact-check agent.*
 
@@ -186,12 +191,14 @@ Optional API protection (see `.env.example`): **`PIPELINE_API_KEY`** for **`POST
 1. The user submits a query (CLI or API).
 2. The **Supervisor** uses deterministic rules to choose the next step.
 3. The **Search Agent** builds 3 queries and fetches up to 9 primary DuckDuckGo hits per run (plus alternate-query / Wikipedia fills when a sub-query is sparse).
-4. The **Analysis Agent** turns raw hits into structured analysis.
-5. The **Writer Agent** drafts a markdown report (title, summary, findings, analysis, conclusion).
-6. The **Critic Agent** returns APPROVED or REVISE (and increments `revision_count` on each critic pass).
-7. On **REVISE**, the **Writer** revises using the critique, then **clears `critique`** so the supervisor routes to the **critic** again (not writer in a loop). After **two critic reviews** (`revision_count >= 2`), the supervisor ends the graph even if the report is still not approved (`supervisor.py`).
-8. The **Evaluator** scores the report and returns JSON scores plus feedback.
-9. When using the API, the final report is written to `/tmp/reports` and the JSON response includes scores and paths.
+4. **Research memory** (if any prior runs exist) is loaded into **`memory_context`** so analysis and writing can reference earlier topics without treating them as live web sources.
+5. The **Analysis Agent** turns raw hits into structured analysis.
+6. The **Writer Agent** drafts a markdown report (title, summary, findings, analysis, conclusion).
+7. The **Critic Agent** returns APPROVED or REVISE (and increments `revision_count` on each critic pass).
+8. On **REVISE**, the **Writer** revises using the critique, then **clears `critique`** so the supervisor routes to the **critic** again (not writer in a loop). After **two critic reviews** (`revision_count >= 2`), the supervisor ends the graph even if the report is still not approved (`supervisor.py`).
+9. After a completed run, the pipeline **appends** the query and summary snippet to the JSON memory file (configurable via **`.env.example`**).
+10. The **Evaluator** scores the report and returns JSON scores plus feedback.
+11. When using the API, the final report is written to `/tmp/reports` and the JSON response includes scores and paths.
 
 ---
 

@@ -1,13 +1,20 @@
 from graph.state import AgentState
+from utils.report_outcome import is_pipeline_failure_report
+
 
 def supervisor_node(state: AgentState) -> AgentState:
     revision_count = state.get('revision_count', 0)
-    search_done = bool(state.get('search_results'))
+    search_done = bool(state.get('search_ran'))
     analysis_done = bool(state.get('analysis'))
     report_done = bool(state.get('report'))
     # Writer clears critique after each successful draft so this becomes False again → critic_agent.
     critique_done = bool(state.get('critique'))
     is_approved = state.get('is_approved', False)
+
+    # Do not send error stubs to the critic or mark them as successful products.
+    if is_pipeline_failure_report(state.get('report')):
+        print('Supervisor -> routing to: END (report or analysis step failed)')
+        return {**state, 'next_agent': 'END', 'is_approved': False}
 
     # Hard rules — no LLM needed, pure logic
     if is_approved:

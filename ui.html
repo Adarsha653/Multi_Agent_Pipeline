@@ -45,6 +45,7 @@
     .meta-item { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 7px 13px; font-size: 0.82rem; color: #666; }
     .meta-item span { color: #e0e0e0; font-weight: 500; }
     .meta-item span.green { color: #22c55e; }
+    .meta-item span.bad { color: #f87171; }
     .meta-actions { margin-left: auto; display: flex; gap: 8px; }
     .feedback { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; display: none; }
     .feedback .label { font-size: 0.7rem; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
@@ -61,8 +62,22 @@
     .prev-section { display: none; border-top: 1px solid #1e1e1e; padding-top: 22px; margin-top: 8px; }
     .prev-label { font-size: 0.72rem; color: #444; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
     .prev-list { display: flex; flex-direction: column; gap: 8px; }
-    .prev-item { display: flex; align-items: center; justify-content: space-between; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px 14px; }
-    .prev-item span { font-size: 0.85rem; color: #888; }
+    .prev-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px 14px; }
+    .prev-item-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+    .prev-item-title { font-size: 0.85rem; color: #888; word-break: break-word; }
+    .prev-item-time { font-size: 0.72rem; color: #555; }
+    .prev-item-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+    .report-modal { display: none; position: fixed; inset: 0; z-index: 1000; padding: 24px 16px; overflow-y: auto; }
+    .report-modal.open { display: block; }
+    .report-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.72); z-index: 0; }
+    .report-modal-panel { position: relative; z-index: 1; width: 100%; max-width: 820px; margin: 24px auto 40px; background: #141414; border: 1px solid #2a2a2a; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+    .report-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+    .report-modal-header span { font-size: 0.82rem; color: #888; word-break: break-all; }
+    /* .report-box defaults to display:none for the main report slot; modal must override */
+    .report-modal-body.report-box { display: block !important; margin-bottom: 0; padding: 20px 22px 28px; }
+    .report-modal-body { overflow-y: auto; color: #bbb; font-size: 0.9rem; line-height: 1.65; }
+    .report-modal-body h1 { font-size: 1.25rem; margin-bottom: 12px; background: none !important; -webkit-background-clip: unset !important; -webkit-text-fill-color: #e0e0e0 !important; color: #e0e0e0 !important; }
+    .report-modal-body h2 { font-size: 1rem; color: #818cf8; margin: 18px 0 8px; }
     .copy-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a1a1a; border: 1px solid #2a2a2a; color: #aaa; font-size: 0.82rem; padding: 10px 20px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     .copy-toast.show { opacity: 1; }
   </style>
@@ -75,6 +90,12 @@
   <div class="search-box">
     <input type="text" id="query" placeholder="Ask anything... e.g. What are the latest AI breakthroughs in 2025?" />
     <button class="btn-primary" id="btn" onclick="runResearch()">Research</button>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:20px;">
+    <input type="file" id="pdfFile" accept=".pdf,application/pdf" style="display:none" />
+    <button type="button" class="btn-secondary" id="pdfPickBtn">Attach PDF…</button>
+    <button type="button" class="btn-secondary" id="pdfClearBtn" style="display:none;">Clear PDFs</button>
+    <span id="uploadStatus" style="font-size:0.82rem; color:#666;"></span>
   </div>
 
   <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px;" id="chips">
@@ -98,12 +119,66 @@
   </div>
 </div>
 
+<div class="report-modal" id="prevReportModal" aria-hidden="true">
+  <div class="report-modal-backdrop" id="prevReportModalBackdrop"></div>
+  <div class="report-modal-panel">
+    <div class="report-modal-header">
+      <span id="prevReportModalTitle"></span>
+      <button type="button" class="btn-secondary" id="prevReportModalClose">Close</button>
+    </div>
+    <div class="report-modal-body report-box" id="prevReportModalBody"></div>
+  </div>
+</div>
+
 <div class="copy-toast" id="toast">Copied to clipboard</div>
 
 <script>
   const API = '';
   let currentFilename = '';
   let currentReport = '';
+  let documentIds = [];
+
+  document.getElementById('pdfPickBtn').addEventListener('click', function () {
+    document.getElementById('pdfFile').click();
+  });
+  document.getElementById('pdfClearBtn').addEventListener('click', function () {
+    documentIds = [];
+    document.getElementById('uploadStatus').textContent = '';
+    document.getElementById('pdfClearBtn').style.display = 'none';
+    document.getElementById('pdfFile').value = '';
+  });
+  document.getElementById('pdfFile').addEventListener('change', async function (e) {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const st = document.getElementById('uploadStatus');
+    st.textContent = 'Uploading…';
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch(API + '/documents/upload', { method: 'POST', body: fd });
+      const text = await res.text();
+      if (!res.ok) {
+        let detail = text;
+        try {
+          const j = JSON.parse(text);
+          if (j && typeof j.detail === 'string') detail = j.detail;
+        } catch (_) {}
+        throw new Error(detail || 'Upload failed');
+      }
+      const data = JSON.parse(text);
+      if (data.document_id) documentIds.push(data.document_id);
+      st.textContent =
+        documentIds.length +
+        ' PDF(s) attached' +
+        (data.filename ? ' — last: ' + data.filename : '') +
+        (data.chunks_indexed != null ? ' (' + data.chunks_indexed + ' chunks)' : '');
+      document.getElementById('pdfClearBtn').style.display = documentIds.length ? 'inline-block' : 'none';
+    } catch (err) {
+      st.textContent = 'Upload failed: ' + (err.message || String(err));
+      document.getElementById('pdfClearBtn').style.display = documentIds.length ? 'inline-block' : 'none';
+    }
+  });
 
   document.getElementById('query').addEventListener('keydown', e => {
     if (e.key === 'Enter') runResearch();
@@ -121,6 +196,14 @@
       '<div class="status-body">' + msg + steps + '</div>';
   }
 
+  function httpErrorDetail(status, bodyText) {
+    try {
+      const j = JSON.parse(bodyText);
+      if (j && typeof j.detail === 'string') return j.detail;
+    } catch (_) {}
+    return bodyText || ('HTTP ' + status);
+  }
+
   function parseSseDataBlock(raw) {
     for (const line of raw.split('\n')) {
       const t = line.trim();
@@ -135,38 +218,73 @@
     return null;
   }
 
+  function pipelineReportFailed(report) {
+    if (!report || typeof report !== 'string') return false;
+    var t = report.trim().toLowerCase();
+    return t.indexOf('report generation failed:') === 0 || t.indexOf('analysis failed:') === 0;
+  }
+
   function renderResearchResult(data) {
-    currentFilename = data.filename;
+    currentFilename = data.filename || '';
     currentReport = data.report;
 
-    setStatus('Report generated and approved!', 'done');
+    var failed = pipelineReportFailed(data.report);
+    if (failed) {
+      setStatus('Report failed to generate.', 'error');
+    } else {
+      setStatus(
+        data.approved ? 'Report generated and approved.' : 'Report generated.',
+        'done'
+      );
+    }
 
     const scoreKeys = ['relevance', 'completeness', 'clarity', 'structure', 'overall'];
     const scoresEl = document.getElementById('scores');
-    scoresEl.style.display = 'grid';
-    scoresEl.innerHTML = scoreKeys.map(
-      k =>
-        '<div class="score-card' + (k === 'overall' ? ' overall' : '') + '">' +
-        '<div class="value">' + (data.scores[k] ?? '?') + '</div>' +
-        '<div class="label">' + k + '</div>' +
-        '</div>'
-    ).join('');
+    if (failed) {
+      scoresEl.style.display = 'none';
+      scoresEl.innerHTML = '';
+    } else {
+      scoresEl.style.display = 'grid';
+      scoresEl.innerHTML = scoreKeys.map(
+        k =>
+          '<div class="score-card' + (k === 'overall' ? ' overall' : '') + '">' +
+          '<div class="value">' + (data.scores[k] ?? '?') + '</div>' +
+          '<div class="label">' + k + '</div>' +
+          '</div>'
+      ).join('');
+    }
 
     const metaEl = document.getElementById('meta');
     metaEl.style.display = 'flex';
+    var approvedCls = failed ? 'bad' : data.approved ? 'green' : 'bad';
+    var approvedLabel = failed ? 'No' : data.approved ? 'Yes' : 'No';
+    var downloadBtn =
+      currentFilename && !failed
+        ? '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>'
+        : '';
     metaEl.innerHTML =
       '<div class="meta-item">Duration: <span>' + data.duration_seconds + 's</span></div>' +
       '<div class="meta-item">Revisions: <span>' + data.revisions + '</span></div>' +
-      '<div class="meta-item">Approved: <span class="green">' + (data.approved ? 'Yes' : 'No') + '</span></div>' +
+      '<div class="meta-item">Approved: <span class="' +
+      approvedCls +
+      '">' +
+      approvedLabel +
+      '</span></div>' +
       '<div class="meta-actions">' +
       '<button class="btn-secondary" onclick="copyReport()">Copy</button>' +
-      '<button class="btn-download" onclick="downloadReport(currentFilename, currentReport)">Download .md</button>' +
+      downloadBtn +
       '</div>';
 
-    if (data.scores.feedback) {
-      const fb = document.getElementById('feedback');
+    const fb = document.getElementById('feedback');
+    if (failed && data.scores && data.scores.feedback) {
+      fb.style.display = 'block';
+      fb.innerHTML = '<div class="label">Note</div><p>' + data.scores.feedback + '</p>';
+    } else if (!failed && data.scores && data.scores.feedback) {
       fb.style.display = 'block';
       fb.innerHTML = '<div class="label">Evaluator feedback</div><p>' + data.scores.feedback + '</p>';
+    } else {
+      fb.style.display = 'none';
+      fb.innerHTML = '';
     }
 
     const reportEl = document.getElementById('report');
@@ -192,6 +310,13 @@
     URL.revokeObjectURL(a.href);
   }
 
+  function escapeAttr(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   async function loadPreviousReports() {
     try {
       const res = await fetch(API + '/reports');
@@ -201,18 +326,82 @@
       const section = document.getElementById('prevSection');
       const list = document.getElementById('prevList');
       section.style.display = 'block';
-      list.innerHTML = reports.slice(0, 8).map(f =>
-        '<div class="prev-item">' +
-          '<span>' + f.replace('.md','') + '</span>' +
-          '<button class="btn-secondary" onclick="fetchAndDownload(\'' + f + '\')">Download</button>' +
-        '</div>'
-      ).join('');
+      list.innerHTML = reports.slice(0, 10).map(function (item) {
+        var row = typeof item === 'string' ? { filename: item, generated_at: '' } : item;
+        var fn = row.filename || '';
+        var ts = row.generated_at || '';
+        var label = fn.replace(/\.md$/i, '');
+        return (
+          '<div class="prev-item">' +
+          '<div class="prev-item-main">' +
+          '<span class="prev-item-title">' +
+          label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+          '</span>' +
+          (ts
+            ? '<span class="prev-item-time">' +
+              ts.replace(/&/g, '&amp;').replace(/</g, '&lt;') +
+              '</span>'
+            : '') +
+          '</div>' +
+          '<div class="prev-item-actions">' +
+          '<button type="button" class="btn-secondary prev-view" data-filename="' +
+          escapeAttr(fn) +
+          '">View</button>' +
+          '<button type="button" class="btn-secondary prev-dl" data-filename="' +
+          escapeAttr(fn) +
+          '">Download</button>' +
+          '</div>' +
+          '</div>'
+        );
+      }).join('');
+      list.querySelectorAll('.prev-view').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var f = btn.getAttribute('data-filename');
+          if (f) viewPreviousReport(f);
+        });
+      });
+      list.querySelectorAll('.prev-dl').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var f = btn.getAttribute('data-filename');
+          if (f) fetchAndDownload(f);
+        });
+      });
     } catch(e) {}
   }
 
+  function closePreviousReportModal() {
+    const m = document.getElementById('prevReportModal');
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+    document.getElementById('prevReportModalBody').innerHTML = '';
+  }
+
+  async function viewPreviousReport(filename) {
+    try {
+      const res = await fetch(API + '/reports/' + encodeURIComponent(filename));
+      if (!res.ok) throw new Error(httpErrorDetail(res.status, await res.text()));
+      const data = await res.json();
+      document.getElementById('prevReportModalTitle').textContent = data.filename || filename;
+      document.getElementById('prevReportModalBody').innerHTML = marked.parse(data.content || '');
+      const m = document.getElementById('prevReportModal');
+      m.classList.add('open');
+      m.setAttribute('aria-hidden', 'false');
+    } catch (e) {
+      showToast('Could not open report');
+    }
+  }
+
+  document.getElementById('prevReportModalClose').addEventListener('click', closePreviousReportModal);
+  document.getElementById('prevReportModalBackdrop').addEventListener('click', closePreviousReportModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.getElementById('prevReportModal').classList.contains('open')) {
+      closePreviousReportModal();
+    }
+  });
+
   async function fetchAndDownload(filename) {
     try {
-      const res = await fetch(API + '/reports/' + filename);
+      const res = await fetch(API + '/reports/' + encodeURIComponent(filename));
       const data = await res.json();
       downloadReport(filename, data.content);
     } catch(e) {
@@ -248,9 +437,12 @@
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, document_ids: documentIds }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(httpErrorDetail(res.status, t));
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

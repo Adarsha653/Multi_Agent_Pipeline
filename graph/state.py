@@ -6,6 +6,12 @@ class AgentState(TypedDict):
     # The original user query
     query: str
 
+    # Optional uploaded PDF ids (Qdrant document_id) to merge into retrieval
+    document_ids: List[str]
+
+    # Set True after search_agent runs (even if zero hits — avoids supervisor deadlock)
+    search_ran: bool
+
     # Full message history across agents
     messages: Annotated[List[BaseMessage], operator.add]
 
@@ -29,3 +35,6 @@ class AgentState(TypedDict):
 
     # How many revision cycles have happened (to prevent infinite loops)
     revision_count: int
+
+    # Prior runs from utils/research_memory (JSON); injected at graph start, not mutated by agents
+    memory_context: str

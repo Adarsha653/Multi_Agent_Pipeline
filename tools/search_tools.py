@@ -93,6 +93,11 @@ def _merge_search_results(primary: list[dict], extra: list[dict]) -> list[dict]:
     return out
 
 
+def merge_search_results(primary: list[dict], extra: list[dict]) -> list[dict]:
+    """Public wrapper: `primary` rows keep their order; `extra` rows append if not duplicates."""
+    return _merge_search_results(primary, extra)
+
+
 def _alternate_ddgs_query(query: str) -> str | None:
     """Broader or rephrased query for a second DDGS pass when the first is thin."""
     q = (query or '').strip()

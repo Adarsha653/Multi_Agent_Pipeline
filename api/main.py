@@ -1,12 +1,14 @@
 import json
+from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 import os as _os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from graph.pipeline import iter_research_events, run_pipeline
+from utils.rag_store import ingest_pdf_bytes
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 import logging
@@ -19,7 +21,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from utils.api_auth import pipeline_api_key_dependency, reports_api_key_dependency
-from utils.groq_llm import chat_groq
+from utils.groq_llm import chat_groq, is_groq_rate_or_token_limit, user_message_for_groq_limit
+from utils.report_outcome import is_pipeline_failure_report, saved_report_markdown_is_failure
 
 load_dotenv()
 
@@ -27,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 RESEARCH_RATE_LIMIT = os.getenv('RESEARCH_RATE_LIMIT', '30/minute')
 READ_REPORTS_RATE_LIMIT = os.getenv('READ_REPORTS_RATE_LIMIT', '120/minute')
+UPLOAD_RATE_LIMIT = os.getenv('UPLOAD_RATE_LIMIT', '20/minute')
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -93,6 +97,13 @@ def _persist_report(
 
 class QueryRequest(BaseModel):
     query: str
+    document_ids: list[str] = Field(default_factory=list)
+
+
+class UploadResponse(BaseModel):
+    document_id: str
+    filename: str
+    chunks_indexed: int
 
 
 class ReportResponse(BaseModel):
@@ -132,6 +143,52 @@ def ready():
     return {'status': 'ready', 'groq': 'configured'}
 
 
+@app.post('/documents/upload', response_model=UploadResponse)
+@limiter.limit(UPLOAD_RATE_LIMIT)
+async def upload_document(
+    request: Request,
+    file: UploadFile = File(...),
+    _auth: None = Depends(pipeline_api_key_dependency),
+):
+    """Upload a PDF, chunk + embed locally, store in Qdrant; returns document_id for POST /research `document_ids`."""
+    name = (file.filename or '').strip()
+    if not name.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail='Only PDF files are supported')
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail='PDF too large (max 25 MB)')
+    if not content.startswith(b'%PDF'):
+        raise HTTPException(status_code=400, detail='File is not a valid PDF')
+    try:
+        doc_id, n = ingest_pdf_bytes(content, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except Exception as e:
+        logger.exception('POST /documents/upload failed')
+        q_url = (os.getenv('QDRANT_URL') or 'http://127.0.0.1:6333').strip()
+        low = str(e).lower()
+        if (
+            'connection refused' in low
+            or 'errno 61' in low
+            or 'failed to connect' in low
+            or 'connecterror' in low.replace(' ', '')
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f'Cannot connect to Qdrant at {q_url} (connection refused). '
+                    'Start Qdrant before uploading, e.g. `docker run -p 6333:6333 qdrant/qdrant`, '
+                    'or set QDRANT_URL if it runs on another host/port. '
+                    'The PDF size is fine; indexing needs a running vector database.'
+                ),
+            ) from None
+        raise HTTPException(
+            status_code=503,
+            detail='Could not index the PDF. Check server logs, QDRANT_URL, and that Qdrant accepts writes.',
+        ) from None
+    return UploadResponse(document_id=doc_id, filename=name, chunks_indexed=n)
+
+
 @app.post('/research', response_model=ReportResponse)
 @limiter.limit(RESEARCH_RATE_LIMIT)
 def run_research(
@@ -143,15 +200,18 @@ def run_research(
         raise HTTPException(status_code=400, detail='Query cannot be empty')
     try:
         start = time.time()
-        result, scores = run_pipeline(payload.query)
+        result, scores = run_pipeline(payload.query, payload.document_ids)
         duration = round(time.time() - start, 2)
-        filepath, filename = _persist_report(
-            payload.query,
-            result['report'],
-            result['is_approved'],
-            result['revision_count'],
-            duration,
-        )
+        if is_pipeline_failure_report(result.get('report')):
+            filepath, filename = '', ''
+        else:
+            filepath, filename = _persist_report(
+                payload.query,
+                result['report'],
+                result['is_approved'],
+                result['revision_count'],
+                duration,
+            )
         return ReportResponse(
             query=payload.query,
             report=result['report'],
@@ -164,6 +224,11 @@ def run_research(
         )
     except Exception as e:
         logger.exception('POST /research failed')
+        if is_groq_rate_or_token_limit(e):
+            raise HTTPException(
+                status_code=503,
+                detail=user_message_for_groq_limit(e),
+            ) from None
         detail = str(e).lower()
         if 'timeout' in detail or 'timed out' in detail:
             raise HTTPException(
@@ -190,20 +255,23 @@ def research_stream(
     def event_generator():
         pending_complete = None
         try:
-            for ev in iter_research_events(payload.query):
+            for ev in iter_research_events(payload.query, payload.document_ids):
                 if ev.get('type') == 'complete':
                     pending_complete = ev
                     continue
                 yield f'data: {json.dumps(ev)}\n\n'
             if pending_complete:
                 r = pending_complete['result']
-                path, fname = _persist_report(
-                    payload.query,
-                    r['report'],
-                    r['is_approved'],
-                    r['revision_count'],
-                    pending_complete['duration_seconds'],
-                )
+                if is_pipeline_failure_report(r.get('report')):
+                    path, fname = '', ''
+                else:
+                    path, fname = _persist_report(
+                        payload.query,
+                        r['report'],
+                        r['is_approved'],
+                        r['revision_count'],
+                        pending_complete['duration_seconds'],
+                    )
                 out = {
                     'type': 'complete',
                     'query': payload.query,
@@ -218,12 +286,15 @@ def research_stream(
                 yield f'data: {json.dumps(out)}\n\n'
         except Exception as e:
             logger.exception('POST /research/stream failed')
-            low = str(e).lower()
-            detail = (
-                'The research request timed out. Try again or use a shorter query.'
-                if 'timeout' in low or 'timed out' in low
-                else 'Research pipeline failed. See server logs for details.'
-            )
+            if is_groq_rate_or_token_limit(e):
+                detail = user_message_for_groq_limit(e)
+            else:
+                low = str(e).lower()
+                detail = (
+                    'The research request timed out. Try again or use a shorter query.'
+                    if 'timeout' in low or 'timed out' in low
+                    else 'Research pipeline failed. See server logs for details.'
+                )
             yield f'data: {json.dumps({"type": "error", "detail": detail})}\n\n'
 
     return StreamingResponse(
@@ -243,9 +314,40 @@ def list_reports(
     request: Request,
     _auth: None = Depends(reports_api_key_dependency),
 ):
-    files = os.listdir('/tmp/reports')
-    reports = [f for f in files if f.endswith('.md')]
-    return {'reports': sorted(reports, reverse=True)}
+    """Newest first by file mtime; each item includes local wall-clock `generated_at`."""
+    base = '/tmp/reports'
+    rows: list[tuple[float, dict[str, str]]] = []
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return {'reports': []}
+    for name in names:
+        if not name.endswith('.md'):
+            continue
+        path = os.path.join(base, name)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        try:
+            with open(path, encoding='utf-8', errors='replace') as fp:
+                head = fp.read(12288)
+        except OSError:
+            continue
+        if saved_report_markdown_is_failure(head):
+            continue
+        dt = datetime.fromtimestamp(mtime)
+        rows.append(
+            (
+                mtime,
+                {
+                    'filename': name,
+                    'generated_at': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                },
+            )
+        )
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return {'reports': [r[1] for r in rows]}
 
 
 @app.get('/reports/{filename}')

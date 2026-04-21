@@ -3,7 +3,7 @@ from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from graph.state import AgentState
 from dotenv import load_dotenv
-from utils.groq_llm import chat_groq
+from utils.groq_llm import chat_groq, user_message_for_groq_limit
 
 load_dotenv()
 llm = chat_groq()
@@ -23,9 +23,12 @@ def _format_source_catalog(results: list) -> tuple[str, str]:
             'state clearly when claims are not backed by retrieved URLs.'
         )
     lines = []
+    any_upload = False
     for i, r in enumerate(results, start=1):
         title = (r.get('title') or 'Untitled').strip()
         url = (r.get('url') or '').strip()
+        if url.lower().startswith('upload://'):
+            any_upload = True
         if url:
             wiki = 'wikipedia.org' in url.lower()
             hint = ' (use Wikipedia contributors … In Wikipedia … Retrieved … from URL)' if wiki else ''
@@ -34,6 +37,18 @@ def _format_source_catalog(results: list) -> tuple[str, str]:
             lines.append(f'[{i}] {title}')
     catalog = '\n'.join(lines)
     retrieved = _apa_retrieved_phrase()
+    upload_block = ''
+    if any_upload:
+        upload_block = f'''
+
+---
+
+**Uploaded PDF** (catalog URL begins with `upload://` — internal user upload, not a public webpage):
+Use gray-literature style. Prefer the filename or title fragment from the catalog line for the work title in sentence case.
+Pattern: Author or Organization. (n.d.). Title from catalog in sentence case [Unpublished PDF]. Retrieved {retrieved}, from the exact upload:// URL shown in the catalog (verbatim).
+If no author is known, use the PDF filename from the catalog as the author-like element before the date.
+Do not invent an https:// URL for these entries.
+'''
     rules = f'''Use ONLY in-text reference numbers [1] through [{len(results)}] from the catalog. Where evidence comes from those sources, end the sentence with the correct [n] markers (e.g. ... claim. [2]).
 After ## Conclusion, add ## References as a markdown ordered list (`1.`, `2.`, …). List order must match in-text [1], [2], … (first source cited = item 1). Each item must follow **APA 7th edition** for the source type — never semicolon-separated catalog dumps.
 
@@ -62,7 +77,7 @@ Use `(Year).` or `(n.d.).` when month/day are unknown. Title and site names use 
 
 **Wrong:** `scribd.com; (n.d.); title; url` or `Wikipedia. (2024, March 12). Quantum computing. Retrieved ...` (missing *Wikipedia contributors*, missing *In Wikipedia.*).
 **Right (non-wiki):** `TechWorld. (2023, June 5). What is machine learning? TechWorld. https://example.com` (adapt author/site from the catalog).
-Do not invent URLs; one list item per cited catalog index.'''
+Do not invent URLs; one list item per cited catalog index.{upload_block}'''
     return catalog, rules
 
 
@@ -80,6 +95,16 @@ def writer_agent_node(state: AgentState) -> AgentState:
             f'\n\nRetrieved sources (map each [n] in the body to one APA entry under ## References):\n{source_catalog}\n'
             if source_catalog else '\n\nNo retrieved URLs — do not add a ## References section.\n'
         )
+        mem = (state.get('memory_context') or '').strip()
+        memory_section = ''
+        if mem:
+            memory_section = (
+                '\n\nEarlier research from past runs in this app (for continuity only; not web sources — do not use [n] for these):\n'
+                f'{mem}\n\n'
+                'You may open the Executive Summary or Key Findings with a brief bridge when relevant '
+                '(e.g. "Following up on our earlier look at EV adoption…") if it matches the memory; '
+                'all factual claims tied to this run\'s web results must still use [n] from the catalog only.\n'
+            )
         response = llm.invoke([
             SystemMessage(content=(
                 'You are a professional report writer. Write a clear structured report with sections: '
@@ -88,7 +113,7 @@ def writer_agent_node(state: AgentState) -> AgentState:
             )),
             HumanMessage(
                 content=(
-                    f"Query: {state['query']}\n{catalog_section}\n"
+                    f"Query: {state['query']}{memory_section}\n{catalog_section}\n"
                     f'Analysis (may contain [n] markers; keep them consistent with the catalog above):\n{state["analysis"]}'
                     f'{critique_section}\n\nWrite the full report now.'
                 )
@@ -104,4 +129,9 @@ def writer_agent_node(state: AgentState) -> AgentState:
         }
     except Exception as e:
         print(f'   Writer Agent failed: {e}')
-        return {**state, 'report': f'Report generation failed: {e}', 'messages': state['messages'] + [AIMessage(content=f'Writer Agent failed: {e}')]}
+        user_msg = user_message_for_groq_limit(e)
+        return {
+            **state,
+            'report': f'Report generation failed: {user_msg}',
+            'messages': state['messages'] + [AIMessage(content=f'Writer Agent failed: {user_msg}')],
+        }

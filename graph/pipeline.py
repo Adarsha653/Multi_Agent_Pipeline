@@ -11,6 +11,8 @@ from agents.writer_agent import writer_agent_node
 from agents.critic_agent import critic_agent_node
 from utils.logger import PipelineLogger
 from eval.evaluator import evaluate_report
+from utils.report_outcome import is_pipeline_failure_report, skipped_eval_scores
+from utils.research_memory import format_memory_for_prompt, record_research_memory
 import time
 
 # User-facing SSE labels when supervisor routes to each worker (stream_mode="values" on next_agent change).
@@ -45,12 +47,16 @@ def build_graph():
     graph.add_edge('critic_agent', 'supervisor')
     return graph.compile()
 
-def run_pipeline(query: str):
+def run_pipeline(query: str, document_ids: list[str] | None = None):
     logger = PipelineLogger(query)
     start_time = time.time()
 
+    memory_context = format_memory_for_prompt(query)
+    docs = [d.strip() for d in (document_ids or []) if d and str(d).strip()]
     initial_state = {
         'query': query,
+        'document_ids': docs,
+        'search_ran': False,
         'messages': [],
         'search_results': [],
         'analysis': '',
@@ -58,7 +64,8 @@ def run_pipeline(query: str):
         'critique': '',
         'is_approved': False,
         'next_agent': '',
-        'revision_count': 0
+        'revision_count': 0,
+        'memory_context': memory_context,
     }
 
     pipeline = build_graph()
@@ -74,25 +81,34 @@ def run_pipeline(query: str):
     print('='*60)
     print(result['report'])
 
-    scores = evaluate_report(query, result['report'], result['search_results'])
+    if is_pipeline_failure_report(result.get('report')):
+        scores = skipped_eval_scores()
+    else:
+        scores = evaluate_report(query, result['report'], result['search_results'])
 
     print(f'\nTotal pipeline time: {total_time}s')
     print(f'Revisions made: {result["revision_count"]}')
     print(f'Approved: {result["is_approved"]}')
     logger.summary()
 
+    record_research_memory(query, result.get('report', ''))
+
     return result, scores
 
 
-def iter_research_events(query: str) -> Iterator[dict[str, Any]]:
+def iter_research_events(query: str, document_ids: list[str] | None = None) -> Iterator[dict[str, Any]]:
     """
     Run the graph once while yielding progress dicts for SSE.
     Yields: {"type": "step", "step": str, "message": str}, then {"type": "complete", ...}.
     """
     logger = PipelineLogger(query)
     start_time = time.time()
+    memory_context = format_memory_for_prompt(query)
+    docs = [d.strip() for d in (document_ids or []) if d and str(d).strip()]
     initial_state: AgentState = {
         'query': query,
+        'document_ids': docs,
+        'search_ran': False,
         'messages': [],
         'search_results': [],
         'analysis': '',
@@ -101,6 +117,7 @@ def iter_research_events(query: str) -> Iterator[dict[str, Any]]:
         'is_approved': False,
         'next_agent': '',
         'revision_count': 0,
+        'memory_context': memory_context,
     }
     pipeline = build_graph()
     print(f'\nRunning pipeline for: {query}\n')
@@ -122,12 +139,17 @@ def iter_research_events(query: str) -> Iterator[dict[str, Any]]:
     logger.end_agent('full_pipeline', {'total_seconds': total_time})
 
     yield {'type': 'step', 'step': 'evaluator', 'message': 'Scoring report…'}
-    scores = evaluate_report(query, final_state.get('report', ''), final_state.get('search_results') or [])
+    if is_pipeline_failure_report(final_state.get('report')):
+        scores = skipped_eval_scores()
+    else:
+        scores = evaluate_report(query, final_state.get('report', ''), final_state.get('search_results') or [])
 
     print(f'\nTotal pipeline time: {total_time}s')
     print(f'Revisions made: {final_state.get("revision_count", 0)}')
     print(f'Approved: {final_state.get("is_approved", False)}')
     logger.summary()
+
+    record_research_memory(query, final_state.get('report', ''))
 
     yield {
         'type': 'complete',
