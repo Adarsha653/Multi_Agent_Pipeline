@@ -19,6 +19,7 @@ import time
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 from utils.api_auth import pipeline_api_key_dependency, reports_api_key_dependency
@@ -29,8 +30,26 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-RESEARCH_RATE_LIMIT = os.getenv('RESEARCH_RATE_LIMIT', '30/minute')
-READ_REPORTS_RATE_LIMIT = os.getenv('READ_REPORTS_RATE_LIMIT', '120/minute')
+
+def research_rate_limit() -> str:
+    """Per-IP cap on POST /research* (evaluated each request for tests and env changes)."""
+    explicit = (os.getenv('RESEARCH_RATE_LIMIT') or '').strip()
+    if explicit:
+        return explicit
+    if (os.getenv('SPACE_ID') or '').strip():
+        return (os.getenv('SPACE_DEFAULT_RESEARCH_RATE_LIMIT') or '5/minute').strip()
+    return '30/minute'
+
+
+def read_reports_rate_limit() -> str:
+    """Per-IP cap on GET /reports*."""
+    explicit = (os.getenv('READ_REPORTS_RATE_LIMIT') or '').strip()
+    if explicit:
+        return explicit
+    if (os.getenv('SPACE_ID') or '').strip():
+        return (os.getenv('SPACE_DEFAULT_READ_REPORTS_RATE_LIMIT') or '60/minute').strip()
+    return '120/minute'
+
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -41,7 +60,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],
@@ -143,7 +162,7 @@ def ready():
 
 
 @app.post('/research', response_model=ReportResponse)
-@limiter.limit(RESEARCH_RATE_LIMIT)
+@limiter.limit(research_rate_limit)
 def run_research(
     request: Request,
     payload: QueryRequest,
@@ -197,7 +216,7 @@ def run_research(
 
 
 @app.post('/research/stream')
-@limiter.limit(RESEARCH_RATE_LIMIT)
+@limiter.limit(research_rate_limit)
 def research_stream(
     request: Request,
     payload: QueryRequest,
@@ -266,7 +285,7 @@ def research_stream(
 
 
 @app.get('/reports')
-@limiter.limit(READ_REPORTS_RATE_LIMIT)
+@limiter.limit(read_reports_rate_limit)
 def list_reports(
     request: Request,
     _auth: None = Depends(reports_api_key_dependency),
@@ -308,7 +327,7 @@ def list_reports(
 
 
 @app.get('/reports/{filename}')
-@limiter.limit(READ_REPORTS_RATE_LIMIT)
+@limiter.limit(read_reports_rate_limit)
 def get_report(
     request: Request,
     filename: str,
@@ -323,7 +342,7 @@ def get_report(
 
 
 @app.get('/reports/{filename}/download')
-@limiter.limit(READ_REPORTS_RATE_LIMIT)
+@limiter.limit(read_reports_rate_limit)
 def download_report(
     request: Request,
     filename: str,
