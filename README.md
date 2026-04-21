@@ -1,3 +1,14 @@
+---
+title: Multi-Agent Research Pipeline
+emoji: 🤖
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Multi-agent research with web search, synthesis, critic, and scoring (FastAPI + LangGraph).
+---
+
 # Multi-Agent Research Pipeline
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)
