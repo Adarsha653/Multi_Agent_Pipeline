@@ -6,7 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Multi-agent research with web search, synthesis, critic, and scoring (FastAPI + LangGraph).
+short_description: Multi-agent web research, synthesis, critic, scoring.
 ---
 
 # Multi-Agent Research Pipeline
