@@ -10,6 +10,10 @@ load_dotenv()
 
 _DEFAULT_MODEL = 'llama-3.3-70b-versatile'
 
+# Groq's client requires a non-empty API key at construction time. GitHub Actions runs import
+# smoke tests without secrets; real requests still need GROQ_API_KEY in the environment.
+_GROQ_CONSTRUCT_PLACEHOLDER_KEY = 'gsk_construct_placeholder_ci_imports_only'
+
 
 def _timeout_seconds() -> float:
     raw = os.getenv('GROQ_REQUEST_TIMEOUT', '120')
@@ -29,12 +33,16 @@ def _max_retries() -> int:
 
 def chat_groq(*, temperature: float = 0, model: str | None = None, **kwargs) -> ChatGroq:
     """Single place for Groq HTTP timeout and transport retries."""
+    merged = dict(kwargs)
+    if 'api_key' not in merged and 'groq_api_key' not in merged:
+        if not (os.getenv('GROQ_API_KEY') or '').strip():
+            merged['api_key'] = _GROQ_CONSTRUCT_PLACEHOLDER_KEY
     return ChatGroq(
         model=model or os.getenv('GROQ_MODEL', _DEFAULT_MODEL),
         temperature=temperature,
         timeout=_timeout_seconds(),
         max_retries=_max_retries(),
-        **kwargs,
+        **merged,
     )
 
 
